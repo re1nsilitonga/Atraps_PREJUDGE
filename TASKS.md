@@ -40,7 +40,7 @@ Create the Supabase project, enable Realtime, get keys into everyone's hands bef
 
 ---
 
-## PJ-102 · Define `core/contract.py` — the verdict seam
+## PJ-102 · Define `core/contract.go` — the verdict seam
 
 **Owner:** A · **Size:** M · **Depends:** none · **⚠️ FREEZE AT T+2**
 
@@ -51,15 +51,15 @@ The single data structure Core emits and every Blocker adapter consumes. This is
 
 - [ ] `Verdict` dataclass: `domain, is_judol, confidence, reason, matched_fields, source (L1|L2), detected_at`
 - [ ] `Evidence` dataclass: `domain, evidence_b64, evidence_type` — **generic, not "screenshot"**
-- [ ] File imports **nothing** beyond stdlib + typing. No FastAPI, no supabase, no requests.
+- [ ] File imports **nothing** beyond the Go standard library. No HTTP framework, no supabase client, no third-party HTTP client.
 - [ ] Documented in README as the binding contract
 - [ ] Frozen at T+2. Changes require all four.
 
 **Technical Notes**
 
-- File: `core/contract.py`
+- File: `core/contract.go`
 - **The seam test:** would this file compile if the extension didn't exist? If no, it's wrong.
-- `evidence_type` matters: Chrome sends a screenshot, Android VpnService will send DNS/SNI. Core must not care. Naming this field `screenshot` now costs a rename during Phase 1.
+- `EvidenceType` matters: Chrome sends a screenshot, Android VpnService will send DNS/SNI. Core must not care. Naming this field `Screenshot` now costs a rename during Phase 1.
 - PRD §14 risk #16: at T+20 someone will want to `import chrome` into Core to fix a bug. This file is the line.
 
 ---
@@ -142,22 +142,21 @@ The PRD §10 endpoint table as binding contract, before implementation.
 **Owner:** A · **Size:** M · **Depends:** PJ-105 · **Unblocks:** B, C
 
 **Description**
-FastAPI returning hardcoded contract-shaped responses. Nobody is blocked on anyone.
+Go `net/http` server returning hardcoded contract-shaped responses. Nobody is blocked on anyone.
 
 **Acceptance Criteria**
 
 - [ ] All 9 routes respond 200 with correct shapes (fake values)
-- [ ] `api/main.py` is **thin** — no detection logic, calls into `core/`
+- [ ] `api/main.go` is **thin** — no detection logic, calls into `core/`
 - [ ] CORS enabled for extension + `localhost:3000`
-- [ ] `/docs` reachable
 - [ ] Done by T+2
 
 **Technical Notes**
 
-- Files: `api/main.py`, `api/models.py`, `requirements.txt`
-- `fastapi`, `uvicorn`, `pydantic`
-- Pydantic models mirror `core/contract.py` — they do not replace it. Core stays framework-free.
-- CORS: `chrome-extension://*` isn't a valid origin match. Use `allow_origins=["*"]` and move on.
+- Files: `api/main.go`, `api/models.go`, `go.mod`
+- Standard library only: `net/http` (Go 1.22+ pattern-based `ServeMux`), `encoding/json`
+- `api/models.go` structs mirror `core/contract.go` — they do not replace it. Core stays framework-free.
+- CORS: `chrome-extension://*` isn't a valid origin match. Use a wildcard `Access-Control-Allow-Origin: *` middleware and move on.
 
 ---
 
@@ -170,7 +169,7 @@ Contract frozen T+2, schema frozen T+4. Ceremony, but the kind that prevents 3am
 
 **Acceptance Criteria**
 
-- [ ] `core/contract.py` header: `# FROZEN T+2. The seam. Changes require all 4.`
+- [ ] `core/contract.go` header: `// FROZEN T+2. The seam. Changes require all 4.`
 - [ ] `db/schema.sql` header: `-- FROZEN T+4. Changes require all 4.`
 - [ ] Both announced in WA
 
@@ -195,7 +194,7 @@ Evidence in → judol verdict out. Core's only AI call.
 
 **Acceptance Criteria**
 
-- [ ] `analyze(evidence: Evidence) → Verdict` — signature matches `core/contract.py`
+- [ ] `Analyze(evidence core.Evidence) (core.Verdict, error)` — signature matches `core/contract.go`
 - [ ] Malformed response → `is_judol=False`, logged, no crash
 - [ ] Raw response retained for `detections.raw_response`
 - [ ] Verified by hand on one real judol screenshot **by T+2**
@@ -204,7 +203,7 @@ Evidence in → judol verdict out. Core's only AI call.
 
 **Technical Notes**
 
-- File: `core/layer2/vision.py`
+- File: `core/layer2/vision.go`
 - Gemini 2.x Flash vision (PRD §8). Model name in a constant.
 - Prompt per §4: _"Apakah ini situs judi online? Ya/tidak, alasan singkat."_ Request JSON-only, strip markdown fences before parsing.
 - **Not our innovation** (PRD §4). No fine-tuning. Get a verdict and move on.
@@ -256,7 +255,7 @@ Verdict → database state change. `status='blocked'` is what Blocker adapters o
 
 **Technical Notes**
 
-- File: `core/layer2/decide.py`
+- File: `core/layer2/decide.go`
 - `L2_CONFIDENCE_THRESHOLD = 0.8`
 - **Core writes the verdict. Core does not know who's listening.** The original plan coupled this to "coordinate with C before changing how this write happens" — that coupling is now deleted by design. Blocker adapters observe `status='blocked'`; Core emits it and forgets.
 - Service role key here. Never anon.
@@ -279,7 +278,7 @@ Real Layer 2 behind the stub.
 
 **Technical Notes**
 
-- File: `api/main.py` — thin, calls `core/layer2/`
+- File: `api/main.go` — thin, calls `core/layer2/`
 - base64 in JSON body, not multipart. Simpler from the extension.
 
 ---
@@ -299,7 +298,7 @@ Run Layer 2 on demo domains ahead of time so a Gemini outage during judging is i
 
 **Technical Notes**
 
-- Files: `core/layer2/vision.py`, cache `db/cache/vision_*.json`
+- Files: `core/layer2/vision.go`, cache `db/cache/vision_*.json`
 - PRD §14 risk #4.
 - Cache-on-failure, not cache-always — live call still happens when the API is up. Judges may ask if it's live.
 - **This ticket doubles as demo cluster bootstrap** (see PJ-801). Same runs, two purposes.
@@ -329,8 +328,8 @@ A Layer 2 confirmation extracts the domain's infrastructure fingerprint and seed
 
 **Technical Notes**
 
-- File: `core/feedback.py` → calls `core/layer1/fingerprint.py`, `core/layer1/cluster.py`
-- FastAPI `BackgroundTasks` is enough. No Celery, no queue.
+- File: `core/feedback.go` → calls `core/layer1/fingerprint.go`, `core/layer1/cluster.go`
+- A `go func() { ... }()` goroutine is enough. No queue, no worker system.
 - **PRD §5 + §14 risk #10:** the entire Innovation defense rests on this loop. If Epic 2 gets cut for time, cut PJ-202 polish — never this.
 - Must be visible in the demo (§15, 1:05–1:35 beat: _"Layer 1 emerges from nothing"_).
 - **Under cold start this is on the critical path, not a nice-to-have.** The old plan let Layer 1 be seeded independently from TrustPositif, so this loop was an enhancement. Masking killed that. Now: no loop → no Layer 1 → no preemptive claim → no pitch.
@@ -361,8 +360,8 @@ Given a domain, pull hosting IP, ASN, nameservers, registrar, TLD, `registered_a
 
 **Technical Notes**
 
-- File: `core/layer1/fingerprint.py`
-- `python-whois`, `dnspython`, RDAP via `requests`
+- File: `core/layer1/fingerprint.go`
+- Go `net` package for DNS/nameserver lookups, `net/http` for RDAP, raw WHOIS via `net.Dial("tcp", "whois.iana.org:43")` — no third-party client needed
 - **PRD §14 risk #8 (High).** Don't build on registrant fields — widely redacted. Use hosting IP + ASN + nameserver + TLD + `registered_at`.
 - **The T+5 gate is specifically about `registered_at`.** If its fill rate is poor, **burst detection (PJ-403) is dead and "preemptive" becomes unsupportable** — cut the claim from the deck at T+5, not at T+20. The original plan weighted `registered_at` at 0.05 as if it didn't matter; under the Netcraft mechanism it's the whole signal.
 - ASN: if it costs >30min, drop it and use IP /24 prefix.
@@ -386,8 +385,8 @@ Group confirmed domains sharing infrastructure. "Same landlord, same street" mad
 
 **Technical Notes**
 
-- File: `core/layer1/cluster.py`
-- Grouping is a `GROUP BY`, not clustering ML. **Do not import sklearn.**
+- File: `core/layer1/cluster.go`
+- Grouping is a `GROUP BY`, not clustering ML. **Do not import a clustering/ML library.**
 - If no cluster reaches 5 members, loosen the key (IP → /24 prefix) before assuming the data is bad.
 - Empty-case handling matters more than it used to: under cold start, empty is where the system _starts_, and the demo's opening beat depends on it not throwing.
 
@@ -410,7 +409,7 @@ Detect clusters of domains registered in the same narrow window by the same regi
 
 **Technical Notes**
 
-- File: `core/layer1/cluster.py`
+- File: `core/layer1/cluster.go`
 - **This existed nowhere in the original backlog.** PRD §4 named it, §6 listed it, §7's wireframe promised the bullet — no ticket built it. It would have shipped as an empty or hardcoded bullet in front of judges.
 - Suggested: `burst_score = domain_count / max(window_hours, 1)`, normalized. Tune with real data.
 - **If the T+5 gate failed, this ticket is cut and §15's script drops the burst line.** Do not fake it.
@@ -434,7 +433,7 @@ Score an unseen domain against known clusters. The Layer 1 detection claim.
 
 **Technical Notes**
 
-- File: `core/layer1/matcher.py`
+- File: `core/layer1/matcher.go`
 - Suggested starting weights (tune, don't treat as gospel):
   `hosting_ip 0.30 · nameserver 0.25 · registration_burst 0.25 · registrar 0.10 · tld 0.10`
 - **Burst is weighted at 0.25, not 0.05.** The original weighting treated registration date as a rounding error; under the Netcraft mechanism it's a primary signal. If the T+5 gate failed, redistribute burst's 0.25 across IP and nameserver and say so.
@@ -459,7 +458,7 @@ Real extraction + matching behind the stub.
 
 **Technical Notes**
 
-- File: `api/main.py` — thin wrapper over `core/layer1/`
+- File: `api/main.go` — thin wrapper over `core/layer1/`
 
 ---
 
@@ -604,7 +603,7 @@ The two endpoints the Blocker consumes.
 
 **Technical Notes**
 
-- File: `api/main.py`
+- File: `api/main.go`
 - Reads denormalized `domains`. No joins — called constantly.
 
 ---
@@ -625,7 +624,7 @@ Back the block page's "Laporkan salah" button.
 
 **Technical Notes**
 
-- File: `api/main.py`
+- File: `api/main.go`
 - Status change → adapter event → Blocker should _unblock_. Verify once; a stuck block after clicking "salah" is an ugly demo moment (PRD §14 risk #14).
 
 ---
@@ -749,7 +748,7 @@ Dashboard read endpoints.
 
 **Technical Notes**
 
-- File: `api/main.py`
+- File: `api/main.go`
 - Joins `domains` × `detections` × `fingerprint_clusters` per §9.
 
 ---
@@ -775,8 +774,8 @@ Submit one **full** domain, get a boolean. Verifier, not seed source.
 
 **Technical Notes**
 
-- File: `core/trustpositif.py`
-- `requests` + `beautifulsoup4` (no official API, §5)
+- File: `core/trustpositif.go`
+- `net/http` + `golang.org/x/net/html` for scraping (no official API, §5) — or a minimal regex-based parser to avoid a new dependency
 - **Masking is why this is verify-only.** Public results come back as `a*****gacor.biz` — unusable for WHOIS, DNS, or fingerprinting. Masking is irrelevant when _we_ supply the full string and only need yes/no back.
 - IP-restricted to Indonesia (§5) — team is in-country; don't develop through a VPN.
 - **Not on the critical path anymore.** Under the old plan this was the #1 risk (bulk-seeding L1). Now Layer 2 bootstraps L1 and TrustPositif is corroboration. Do not let it consume T+2–T+5 like the original PJ-202 did.
@@ -799,7 +798,7 @@ Extract structure from `a*****gacor.biz`: first char, masked length, suffix. Sto
 
 **Technical Notes**
 
-- File: `core/trustpositif.py`
+- File: `core/trustpositif.go`
 - The mask leaks real constraints: exact prefix char, exact segment length, exact suffix. Enough to narrow blind combinatorics to constrained guessing.
 - **Nice-to-have (§6).** Build only if green at T+16. The system bootstraps from Layer 2 regardless.
 
@@ -823,7 +822,7 @@ Empty DB → N Layer 2 confirmations → M Layer 1 preemptive catches. Replaces 
 
 **Technical Notes**
 
-- File: `scripts/bootstrap_run.py`
+- File: `scripts/bootstrap_run.go`
 - **The leakage assertion is the whole ticket.** If a domain Layer 2 confirmed gets counted as a Layer 1 preemptive catch, the ratio is fake and §15's honesty beat becomes a confident lie told to judges. Worse than a bad number.
 - **PRD §14 risk #9: do not tune the ratio.** If 5 confirmations bought 2 catches, ship that. "PREDATOR's 70% came from a full dataset over months; we started from an empty database 20 hours ago" is a strong answer. A suspiciously perfect number invites the question you don't want.
 - Misses give D a real answer to "where does this fail?"
@@ -845,7 +844,7 @@ Serve the latest cold-start run.
 
 **Technical Notes**
 
-- File: `api/main.py`
+- File: `api/main.go`
 - The zero state is the demo's first frame. It must be a valid response, not an empty-state error.
 
 ---

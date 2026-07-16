@@ -15,7 +15,7 @@ Everything blocks on this. Contains the seam that makes the Android roadmap real
 
 - Supabase project, credential distribution
 - `schema.sql`: domains, fingerprint_clusters (incl. registration-burst fields), detections, whois_records, bootstrap_runs
-- **`core/contract.py` — the verdict contract.** Single emit point: `{domain, is_judol, confidence, reason, matched_fields}`. This is the Core/Blocker seam.
+- **`core/contract.go` — the verdict contract.** Single emit point: `{domain, is_judol, confidence, reason, matched_fields}`. This is the Core/Blocker seam.
 - Fixture data (clearly marked, purgeable) so Presentation can build at T+1 against an intentionally-empty production DB
 - API contract published before any logic
 - Schema frozen T+4, contract frozen T+2

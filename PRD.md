@@ -218,7 +218,7 @@ User opens unknown domain
    → Blocker captures evidence → Core /analyze → Gemini
    → "YES — slot UI, deposit CTA"
    → Verdict written: status='blocked', source='L2'
-   → feedback.py: extract fingerprint → seed/update cluster
+   → feedback.go: extract fingerprint → seed/update cluster
    → Layer 1 now knows something it didn't 2 seconds ago
 ```
 
@@ -323,10 +323,10 @@ Open dashboard → detected list (domain, confidence, L1/L2, time)
 
 | Module           | Layer              | Choice                                                    | Rationale                                                                                    |
 | ---------------- | ------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| **Core**         | Detection pipeline | Python 3.11 (pure, no framework imports)                  | Portable. `core/` must not import FastAPI, Chrome, or Supabase-realtime.                     |
+| **Core**         | Detection pipeline | Go 1.26 (stdlib only, no framework imports)                | Portable. `core/` must not import an HTTP framework, Chrome, or Supabase-realtime.            |
 | **Core**         | Vision             | Gemini 2.x Flash vision API                               | Cheap, fast, no self-trained model (not our innovation)                                      |
-| **Core**         | WHOIS/DNS          | `python-whois`, `dnspython`, RDAP                         | Free, no key                                                                                 |
-| **API**          | Transport          | FastAPI                                                   | Thin wrapper over Core. Owns HTTP, not logic.                                                |
+| **Core**         | WHOIS/DNS          | Go `net` (DNS) + `net/http` (RDAP) + raw WHOIS via `net.Dial` | Free, no key, no third-party client needed                                                |
+| **API**          | Transport          | Go `net/http` (stdlib `ServeMux`)                          | Thin wrapper over Core. Owns HTTP, not logic.                                                |
 | **Blocker**      | Chrome adapter     | MV3, vanilla JS + `declarativeNetRequest`                 | No build step. React in an extension is a time sink.                                         |
 | **Blocker**      | Verdict transport  | Supabase Realtime **or** 3s polling (flag)                | Two adapters, one Core contract. Proof the seam works.                                       |
 | **Blocker**      | Evidence capture   | Chrome `captureVisibleTab`                                | **Chrome-specific. Does not port to Android.** Isolated in `blocker/evidence.js` on purpose. |
@@ -343,7 +343,7 @@ Open dashboard → detected list (domain, confidence, L1/L2, time)
 - No new library after **T+14** without full-team agreement.
 - All API keys in a shared `.env` distributed at T+0. Nobody hunts for keys at 3am.
 - **`core/` imports nothing Chrome-shaped, nothing realtime-shaped, nothing UI-shaped.** This is the Android roadmap's only insurance policy.
-- **No sklearn, no ML in Layer 1.** Deterministic by design (§4).
+- **No ML/clustering library, no ML in Layer 1.** Deterministic by design (§4).
 
 ---
 
@@ -460,23 +460,24 @@ Base: `/api/v1`
 prejudge/
 ├── README.md                 ← Core verdict contract + API + .env template
 ├── .env.example
+├── go.mod                    ← single module covering core/ + api/ + db/
 │
 ├── core/                     ← CORE ENGINE — OWNERS: A (layer1) / B (layer2)
 │   │                            NO Chrome APIs. NO realtime. NO UI. Portable to Android as-is.
-│   ├── contract.py           ← Verdict dataclass. The seam. Touch = all-4 discussion.
+│   ├── contract.go           ← Verdict struct. The seam. Touch = all-4 discussion.
 │   ├── layer1/               ← A ONLY
-│   │   ├── fingerprint.py    ← WHOIS/DNS/RDAP extract
-│   │   ├── cluster.py        ← grouping + registration-burst detection
-│   │   └── matcher.py        ← cluster similarity → matched_fields
+│   │   ├── fingerprint.go    ← WHOIS/DNS/RDAP extract
+│   │   ├── cluster.go        ← grouping + registration-burst detection
+│   │   └── matcher.go        ← cluster similarity → matched_fields
 │   ├── layer2/               ← B ONLY
-│   │   ├── vision.py         ← Gemini client (evidence → verdict)
-│   │   └── decide.py         ← threshold logic → emit verdict
-│   ├── feedback.py           ← L2 verdict → L1 cluster seeding (THE LOOP)
-│   └── trustpositif.py       ← single-domain verifier + masked-pattern parser
+│   │   ├── vision.go         ← Gemini client (evidence → verdict)
+│   │   └── decide.go         ← threshold logic → emit verdict
+│   ├── feedback.go           ← L2 verdict → L1 cluster seeding (THE LOOP)
+│   └── trustpositif.go       ← single-domain verifier + masked-pattern parser
 │
 ├── api/                      ← TRANSPORT — OWNER: A
-│   ├── main.py               ← FastAPI. Thin. Calls core/, returns verdicts.
-│   └── models.py             ← Pydantic request/response
+│   ├── main.go                ← Go net/http. Thin. Calls core/, returns verdicts.
+│   └── models.go               ← request/response structs
 │
 ├── blocker/                  ← BLOCKER SERVICE (Chrome adapter) — OWNER: C
 │   ├── manifest.json
@@ -499,7 +500,7 @@ prejudge/
 │   └── fixtures.sql          ← FIXTURE ONLY. Purge before demo.
 │
 ├── scripts/
-│   └── bootstrap_run.py      ← cold-start proof: N confirmations → M catches
+│   └── bootstrap_run.go      ← cold-start proof: N confirmations → M catches
 │
 └── pitch/                    ← OWNER: D
     ├── deck.pdf
@@ -513,7 +514,7 @@ prejudge/
 - Branch naming: `a/core-layer1-burst`, `c/blocker-realtime`
 - PR to `main`, no direct pushes. Reviewer = anyone awake.
 - **`db/schema.sql` frozen at T+4.** Changes after that need all four to agree.
-- **`core/contract.py` frozen at T+2.** It is the seam. If it churns, the modularity is theatre.
+- **`core/contract.go` frozen at T+2.** It is the seam. If it churns, the modularity is theatre.
 
 **The seam test — run it mentally before every Core commit:** _would this file still compile if the extension didn't exist?_ If no, it's in the wrong directory. `core/` must have zero knowledge of Chrome, of Supabase realtime, of the block page. That is what makes the Android port a port instead of a rewrite.
 
@@ -523,8 +524,8 @@ prejudge/
 
 |       | Role                    | Owns                                              | Primary deliverable                                                  |
 | ----- | ----------------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
-| **A** | Core/Layer 1 + Schema   | `core/layer1/`, `core/contract.py`, `db/`, `api/` | Fingerprint + burst detection + matcher + `matched_fields`           |
-| **B** | Core/Layer 2 + Feedback | `core/layer2/`, `core/feedback.py`                | Vision bootstrap + **the L2→L1 loop** (the novelty claim)            |
+| **A** | Core/Layer 1 + Schema   | `core/layer1/`, `core/contract.go`, `db/`, `api/` | Fingerprint + burst detection + matcher + `matched_fields`           |
+| **B** | Core/Layer 2 + Feedback | `core/layer2/`, `core/feedback.go`                | Vision bootstrap + **the L2→L1 loop** (the novelty claim)            |
 | **C** | Blocker + Presentation  | `blocker/`, `presentation/`                       | Two-device block (realtime + polling adapters) + dashboard           |
 | **D** | Pitch, Research & QA    | `pitch/`, demo reliability (Epic 8)               | 2-min deck + demo script + cluster bootstrap + verified `sources.md` |
 
@@ -534,7 +535,7 @@ prejudge/
 - **B's Epic 3 (the feedback loop) is now on the critical path, not a nice-to-have.** Under cold start, no loop → no Layer 1 → no preemptive claim. If B is stuck at T+8, A should pair rather than polish the matcher — a perfect matcher with no clusters to match against is worth nothing.
 - **D is not idle.** D owns: source verification (§16), the demo script, **the cluster bootstrap (§14 risk #1 — the top risk)**, and being the person who clicks through the demo 5+ times to find where it breaks. D is the only one testing like a judge.
 - **D pitches.** D has heard the least code and will therefore explain it in the least jargon — which is literally criterion #1.
-- **A owns the schema and the contract.** If two people write schema, you get two schemas. If two people edit `core/contract.py`, the seam is theatre.
+- **A owns the schema and the contract.** If two people write schema, you get two schemas. If two people edit `core/contract.go`, the seam is theatre.
 
 **Scheduling consequence of cold start:** Layer 1 used to be seedable independently from TrustPositif, so A and B could work in parallel. Masking killed that. The chain is now **serial: L2 → feedback → L1**. A's Epic 4 depends on B's Epic 3 producing clusters. Plan for A to be partially blocked around T+5–T+8 and use that window for the fill-rate report and the API surface, not for waiting.
 
@@ -546,13 +547,13 @@ Blocks of ~4h. `T+0` = start.
 
 | Block | Window       | A (Core/L1)                                                                                                                                    | B (Core/L2)                                            | C (Blocker/Presentation)                                                 | D (Pitch/QA)                                          |
 | ----- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------- |
-| **1** | T+0 → T+2    | Supabase, `schema.sql`, **`core/contract.py` — the seam**, stub API                                                                            | Gemini key working, one evidence → verdict by hand     | `manifest.json`, extension loads, **realtime adapter prints to console** | Lock problem statement, start `sources.md`            |
+| **1** | T+0 → T+2    | Supabase, `schema.sql`, **`core/contract.go` — the seam**, stub API                                                                            | Gemini key working, one evidence → verdict by hand     | `manifest.json`, extension loads, **realtime adapter prints to console** | Lock problem statement, start `sources.md`            |
 | **2** | T+2 → T+5    | Fingerprint extractor + **WHOIS fill-rate report** ← gate                                                                                      | `/analyze` roundtrip: evidence → Gemini → verdict → DB | **Hardcoded blocklist blocks a real domain** ← gate                      | Deck skeleton, verify PPATK/Netcraft/PREDATOR figures |
 | —     | **T+5**      | 🚩 **Fill-rate gate.** If `registered_at` fill rate is poor, **burst detection is dead** — cut it from the pitch now, not at T+20.             |                                                        |                                                                          |                                                       |
 | **3** | T+5 → T+8    | Cluster builder + **registration-burst detection**                                                                                             | **Feedback loop L2 → L1** ← the novelty claim          | Block page w/ score + `matched_fields`; dashboard list                   | Deck v1. Start demo script.                           |
 | **4** | T+8 → T+9.5  | Matcher + `matched_fields` output                                                                                                              | Threshold tuning, `raw_response` logging               | **Two-device propagation working** + **polling adapter built**           | 🚩 **CHECKPOINT T+9.5**                               |
 | —     | **T+9.5**    | **GO/NO-GO.** If two-device block doesn't work, all four fix it. This is the demo.                                                             |                                                        |                                                                          |                                                       |
-| **5** | T+9.5 → T+12 | `/blocklist`, `/domains`, `/bootstrap` real                                                                                                    | `bootstrap_run.py` — cold-start proof                  | Dashboard detail + siblings + Cold Start tab                             | Rehearse #1. Find breakage.                           |
+| **5** | T+9.5 → T+12 | `/blocklist`, `/domains`, `/bootstrap` real                                                                                                    | `bootstrap_run.go` — cold-start proof                  | Dashboard detail + siblings + Cold Start tab                             | Rehearse #1. Find breakage.                           |
 | **6** | T+12 → T+14  | Bugfix                                                                                                                                         | **Bootstrap the demo clusters** ← see gate below       | Polish block page, dashboard                                             | Deck v2, **record fallback video**                    |
 | —     | **T+14**     | 🚩 **Cluster gate (§14 risk #1).** Does ≥1 cluster have ≥5 siblings? **If no: cut the Layer 1 beat from the demo now.** 🛑 **FEATURE FREEZE.** |                                                        |                                                                          |                                                       |
 | **7** | T+14 → T+17  | **SLEEP (A, B)** — 3h, staggered                                                                                                               |                                                        | Bugfix, then sleep                                                       | Rehearse #2, #3                                       |
