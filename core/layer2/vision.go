@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,6 +38,11 @@ type VisionClient struct {
 	Model      string
 	HTTPClient *http.Client
 	Endpoint   string // overrides the built endpoint; used by tests
+
+	// CacheDir, if set, enables the PJ-205 on-disk fallback cache: every
+	// successful Analyze is written here, and AnalyzeCached serves the
+	// cached verdict if the live call fails. Empty means no caching.
+	CacheDir string
 }
 
 func NewVisionClient(apiKey string) *VisionClient {
@@ -170,4 +177,43 @@ func stripMarkdownFences(s string) string {
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
 	return strings.TrimSpace(s)
+}
+
+func (c *VisionClient) cacheFilePath(domain string) string {
+	if c.CacheDir == "" {
+		return ""
+	}
+	safe := strings.NewReplacer("/", "_", ":", "_").Replace(domain)
+	return filepath.Join(c.CacheDir, "vision_"+safe+".json")
+}
+
+// AnalyzeCached wraps Analyze with an on-disk fallback cache (PJ-205). The
+// live call always happens first — this is cache-on-failure, not
+// cache-always, so a live demo still hits Gemini when it's up (judges may
+// ask). A prior successful run's cached verdict only covers an outage
+// during the demo itself (PRD §14 risk #4: "Gemini down = no bootstrap").
+func (c *VisionClient) AnalyzeCached(ctx context.Context, ev core.Evidence) (AnalyzeResult, error) {
+	result, err := c.Analyze(ctx, ev)
+	path := c.cacheFilePath(ev.Domain)
+
+	if err == nil {
+		if path != "" {
+			if data, mErr := json.Marshal(result); mErr == nil {
+				if mkErr := os.MkdirAll(c.CacheDir, 0o755); mkErr == nil {
+					_ = os.WriteFile(path, data, 0o644)
+				}
+			}
+		}
+		return result, nil
+	}
+
+	if path != "" {
+		if data, readErr := os.ReadFile(path); readErr == nil {
+			var cached AnalyzeResult
+			if json.Unmarshal(data, &cached) == nil {
+				return cached, nil
+			}
+		}
+	}
+	return result, err
 }
