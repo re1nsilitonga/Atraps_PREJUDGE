@@ -61,8 +61,11 @@ func (r *ClusterRepository) Upsert(ctx context.Context, c layer1.Cluster) (strin
 
 // ListClusters loads clusters for the matcher (PJ-405's /fingerprint endpoint).
 func (r *ClusterRepository) ListClusters(ctx context.Context) ([]layer1.Cluster, error) {
+	// host(hosting_ip), not hosting_ip::text — ::text on an inet column
+	// includes the netmask ("203.0.113.55/32"), which never equality-matches
+	// a plain IP string from DNS. host() strips it to the bare address.
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, hosting_ip::text, COALESCE(nameserver, ''), COALESCE(registrar, ''), COALESCE(tld, ''), registration_burst_score
+		SELECT id, host(hosting_ip), COALESCE(nameserver, ''), COALESCE(registrar, ''), COALESCE(tld, ''), registration_burst_score
 		FROM fingerprint_clusters
 	`)
 	if err != nil {
