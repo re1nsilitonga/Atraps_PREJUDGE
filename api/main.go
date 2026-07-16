@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,7 +16,9 @@ import (
 	"time"
 
 	"prejudge/core"
+	"prejudge/core/layer1"
 	"prejudge/core/layer2"
+	"prejudge/db"
 )
 
 // memoryDomainStore is a placeholder layer2.DomainStore until the real
@@ -75,15 +78,41 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+type fingerprintExtractor interface {
+	Extract(ctx context.Context, domain string) (layer1.Fingerprint, error)
+}
+
+type clusterLister interface {
+	ListClusters(ctx context.Context) ([]layer1.Cluster, error)
+}
+
+// noopClusterLister degrades /fingerprint to a clean no-match when
+// DATABASE_URL isn't configured (e.g. local dev), instead of crashing the
+// whole server — mirrors the vision-client "stub if no key" pattern below.
+type noopClusterLister struct{}
+
+func (noopClusterLister) ListClusters(ctx context.Context) ([]layer1.Cluster, error) {
+	return nil, nil
+}
+
 func newMux() http.Handler {
 	vision := layer2.NewVisionClient(os.Getenv("GEMINI_API_KEY"))
 	store := newMemoryDomainStore()
-	return newMuxWith(vision, store)
+
+	var clusters clusterLister = noopClusterLister{}
+	if pool, err := db.Connect(context.Background()); err != nil {
+		log.Printf("db connect failed, /fingerprint will report no-match: %v", err)
+	} else {
+		clusters = db.NewClusterRepository(pool)
+	}
+
+	return newMuxWith(vision, store, layer1.NewExtractor(), clusters)
 }
 
 // newMuxWith builds the router with explicit dependencies, so tests can
-// inject a fake Gemini endpoint / store without touching env vars.
-func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore) http.Handler {
+// inject a fake Gemini endpoint / store / fingerprint extractor / cluster
+// source without touching env vars or a live network/DB.
+func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore, extractor fingerprintExtractor, clusters clusterLister) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/blocklist", func(w http.ResponseWriter, r *http.Request) {
@@ -149,8 +178,45 @@ func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore) http.Hand
 		})
 	})
 
+	// PJ-405: real extraction + matching behind the stub shape.
 	mux.HandleFunc("POST /api/v1/fingerprint", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, FingerprintResponse{MatchScore: 0, MatchedFields: []string{}})
+		var body FingerprintRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+
+		noMatch := FingerprintResponse{MatchScore: 0, MatchedFields: []string{}}
+
+		fp, err := extractor.Extract(r.Context(), body.Domain)
+		if err != nil {
+			writeJSON(w, http.StatusOK, noMatch)
+			return
+		}
+
+		clusterList, err := clusters.ListClusters(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusOK, noMatch)
+			return
+		}
+
+		result := layer1.Match(fp, clusterList)
+		if result == nil {
+			writeJSON(w, http.StatusOK, noMatch)
+			return
+		}
+
+		clusterID := result.ClusterID
+		tldCopy := fp.TLD
+		writeJSON(w, http.StatusOK, FingerprintResponse{
+			ClusterID:     &clusterID,
+			Registrar:     fp.Registrar,
+			IP:            fp.HostingIP,
+			NS:            fp.Nameserver,
+			TLD:           &tldCopy,
+			MatchScore:    result.Score,
+			MatchedFields: result.MatchedFields,
+		})
 	})
 
 	mux.HandleFunc("GET /api/v1/domains", func(w http.ResponseWriter, r *http.Request) {
