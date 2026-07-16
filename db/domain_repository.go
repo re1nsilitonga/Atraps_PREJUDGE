@@ -260,6 +260,17 @@ func (r *DomainRepository) BootstrapLatest(ctx context.Context) (*BootstrapRun, 
 	return &run, nil
 }
 
+// RecordBootstrapRun writes one cold-start proof run (PJ-703). Each call is
+// a new row — re-running the script from a clean state is safe by
+// construction, not something the repository has to special-case.
+func (r *DomainRepository) RecordBootstrapRun(ctx context.Context, l2Confirmations, l1PreemptiveCatches, l1Misses int, notes string) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO bootstrap_runs (l2_confirmations, l1_preemptive_catches, l1_misses, notes)
+		VALUES ($1, $2, $3, $4)
+	`, l2Confirmations, l1PreemptiveCatches, l1Misses, notes)
+	return err
+}
+
 // EnsureDomain returns the id of domain, inserting a status='candidate' row
 // if none exists yet. Called synchronously from the /analyze handler (PJ-204)
 // because the response contract requires domain_id in the same response —
