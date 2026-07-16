@@ -22,10 +22,21 @@ import (
 	"prejudge/db"
 )
 
-// memoryDomainStore is a placeholder layer2.DomainStore until the real
-// Postgres/Supabase-backed store lands (Epic 1, owner A). It exists so
-// PJ-204's /analyze wiring can be exercised end-to-end without a DB
-// dependency; swap this out, not the handler, once the real store exists.
+// analyzeStore is the persistence surface /analyze needs: the
+// layer2.DomainStore + core.ConfirmedDomains contracts, plus EnsureDomain
+// for the domain_id the response contract requires synchronously (it can't
+// wait for the async Decide/Feedback goroutine). Satisfied by both
+// *memoryDomainStore (no DATABASE_URL) and *db.DomainRepository (real).
+type analyzeStore interface {
+	layer2.DomainStore
+	core.ConfirmedDomains
+	EnsureDomain(ctx context.Context, domain string) (string, error)
+}
+
+// memoryDomainStore is a placeholder analyzeStore for local dev without
+// DATABASE_URL. It exists so /analyze can be exercised end-to-end without a
+// DB dependency; swap the wiring in newMux, not the handler, once
+// DATABASE_URL is configured.
 type memoryDomainStore struct {
 	mu       sync.Mutex
 	blocked  map[string]core.Verdict
@@ -39,7 +50,7 @@ func newMemoryDomainStore() *memoryDomainStore {
 	}
 }
 
-func (s *memoryDomainStore) UpsertBlocked(v core.Verdict) error {
+func (s *memoryDomainStore) UpsertBlocked(ctx context.Context, v core.Verdict) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.blocked[v.Domain] = v
@@ -47,7 +58,7 @@ func (s *memoryDomainStore) UpsertBlocked(v core.Verdict) error {
 	return nil
 }
 
-func (s *memoryDomainStore) LogDetection(domain string, layer int, confidence float64, reason string, raw json.RawMessage) error {
+func (s *memoryDomainStore) LogDetection(ctx context.Context, domain string, layer int, confidence float64, reason string, raw json.RawMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.idFor(domain)
@@ -67,10 +78,22 @@ func (s *memoryDomainStore) idFor(domain string) string {
 	return id
 }
 
-func (s *memoryDomainStore) IDFor(domain string) string {
+func (s *memoryDomainStore) EnsureDomain(ctx context.Context, domain string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.idFor(domain)
+	return s.idFor(domain), nil
+}
+
+// ListConfirmed satisfies core.ConfirmedDomains — the feedback loop (PJ-301)
+// rebuilds clusters from every domain this store has ever blocked.
+func (s *memoryDomainStore) ListConfirmed(ctx context.Context) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	domains := make([]string, 0, len(s.blocked))
+	for domain := range s.blocked {
+		domains = append(domains, domain)
+	}
+	return domains, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -108,6 +131,15 @@ func (noopClusterLister) ListClusters(ctx context.Context) ([]layer1.Cluster, er
 	return nil, nil
 }
 
+// noopClusterStore makes the feedback loop (PJ-301) a no-op when
+// DATABASE_URL isn't configured, instead of crashing the background
+// goroutine — same reasoning as noopClusterLister above.
+type noopClusterStore struct{}
+
+func (noopClusterStore) Upsert(ctx context.Context, c layer1.Cluster) (string, error) {
+	return "", nil
+}
+
 // noopDomainRepository degrades every domains/blocklist/bootstrap endpoint
 // to its documented empty state when DATABASE_URL isn't configured, instead
 // of crashing the whole server.
@@ -142,24 +174,31 @@ func newMux() http.Handler {
 	if model := os.Getenv("GEMINI_MODEL"); model != "" {
 		vision.Model = model
 	}
-	store := newMemoryDomainStore()
 
+	var store analyzeStore = newMemoryDomainStore()
 	var clusters clusterLister = noopClusterLister{}
+	var clusterStore core.ClusterStore = noopClusterStore{}
 	var domains domainRepository = noopDomainRepository{}
 	if pool, err := db.Connect(context.Background()); err != nil {
 		log.Printf("db connect failed, /fingerprint and domain endpoints will report empty state: %v", err)
 	} else {
-		clusters = db.NewClusterRepository(pool)
-		domains = db.NewDomainRepository(pool)
+		clusterRepo := db.NewClusterRepository(pool)
+		clusters = clusterRepo
+		clusterStore = clusterRepo
+
+		domainRepo := db.NewDomainRepository(pool)
+		store = domainRepo
+		domains = domainRepo
 	}
 
-	return newMuxWith(vision, store, layer1.NewExtractor(), clusters, domains)
+	return newMuxWith(vision, store, layer1.NewExtractor(), clusters, clusterStore, domains)
 }
 
 // newMuxWith builds the router with explicit dependencies, so tests can
 // inject a fake Gemini endpoint / store / fingerprint extractor / cluster
-// source / domain repository without touching env vars or a live network/DB.
-func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore, extractor fingerprintExtractor, clusters clusterLister, domains domainRepository) http.Handler {
+// source / cluster store / domain repository without touching env vars or a
+// live network/DB.
+func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor fingerprintExtractor, clusters clusterLister, clusterStore core.ClusterStore, domains domainRepository) http.Handler {
 	mux := http.NewServeMux()
 
 	// PJ-506: real blocklist read. `since` filters to rows blocked after
@@ -234,6 +273,14 @@ func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore, extractor
 			return
 		}
 
+		// EnsureDomain runs synchronously — the response contract requires
+		// domain_id in this same response, so it can't wait for the async
+		// Decide/Feedback goroutine below.
+		domainID, idErr := store.EnsureDomain(r.Context(), body.Domain)
+		if idErr != nil {
+			log.Printf("ensure domain failed for %s: %v", body.Domain, idErr)
+		}
+
 		result, err := vision.Analyze(r.Context(), core.Evidence{
 			Domain:       body.Domain,
 			EvidenceB64:  body.EvidenceB64,
@@ -246,16 +293,24 @@ func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore, extractor
 				IsJudol:    false,
 				Confidence: 0,
 				Reason:     "analisis gagal, coba lagi nanti",
-				DomainID:   store.IDFor(body.Domain),
+				DomainID:   domainID,
 			})
 			return
 		}
 
-		// PJ-204: feedback loop (PJ-301) fires in the background so it
-		// never delays the response.
+		// PJ-204/PJ-301: threshold decision, then cluster seeding, both
+		// fire in the background so neither delays the response.
 		go func() {
-			if err := layer2.Decide(store, result); err != nil {
+			ctx := context.Background()
+			if err := layer2.Decide(ctx, store, result); err != nil {
 				log.Printf("layer2 decide failed for %s: %v", body.Domain, err)
+				return
+			}
+			if !result.Verdict.IsJudol || result.Verdict.Confidence < layer2.L2ConfidenceThreshold {
+				return
+			}
+			if err := core.Feedback(ctx, store, extractor, clusterStore); err != nil {
+				log.Printf("feedback loop failed for %s: %v", body.Domain, err)
 			}
 		}()
 
@@ -263,7 +318,7 @@ func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore, extractor
 			IsJudol:    result.Verdict.IsJudol,
 			Confidence: result.Verdict.Confidence,
 			Reason:     result.Verdict.Reason,
-			DomainID:   store.IDFor(body.Domain),
+			DomainID:   domainID,
 		})
 	})
 
