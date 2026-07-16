@@ -174,6 +174,9 @@ func newMux() http.Handler {
 	if model := os.Getenv("GEMINI_MODEL"); model != "" {
 		vision.Model = model
 	}
+	if cacheDir := os.Getenv("GEMINI_CACHE_DIR"); cacheDir != "" {
+		vision.CacheDir = cacheDir
+	}
 
 	var store analyzeStore = newMemoryDomainStore()
 	var clusters clusterLister = noopClusterLister{}
@@ -281,7 +284,7 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 			log.Printf("ensure domain failed for %s: %v", body.Domain, idErr)
 		}
 
-		result, err := vision.Analyze(r.Context(), core.Evidence{
+		result, err := vision.AnalyzeCached(r.Context(), core.Evidence{
 			Domain:       body.Domain,
 			EvidenceB64:  body.EvidenceB64,
 			EvidenceType: core.EvidenceScreenshot,
