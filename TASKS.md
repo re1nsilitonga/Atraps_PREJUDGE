@@ -757,50 +757,31 @@ Dashboard read endpoints.
 
 ---
 
-## PJ-701 · TrustPositif single-domain verifier
+## PJ-701 · ~~TrustPositif single-domain verifier~~ — CUT
 
-**Owner:** A · **Size:** M · **Depends:** PJ-102
+**Owner:** A · **Size:** M · **Depends:** PJ-102 · **🛑 CUT — team decision, do not build**
 
-**Description**
-Submit one **full** domain, get a boolean. Verifier, not seed source.
+**Why cut:** `trustpositif.komdigi.go.id`'s search form requires solving a Google reCAPTCHA v3 token client-side (`grecaptcha.execute(...)`) before the server accepts a query — confirmed by inspecting the live page's form (`method="GET" action=".../welcome"`, hidden `csrf_token` + `recaptcha_token` fields). There is no automatable path that isn't a CAPTCHA bypass, and this project already forbids that exact move for aduankonten.id (PRD §6 "Explicitly NOT building"). The same line applies here.
 
-**Acceptance Criteria**
+**What shipped instead:** `POST /api/v1/trustpositif/verify` stays in the API contract as a permanent stub returning `{domain, is_blocked: false}` (see `api/main.go`). No `core/trustpositif.go` file exists and none should be added.
 
-- [ ] `verify(domain) → bool`
-- [ ] Results cached to disk
-- [ ] Rate limited, configurable delay
-- [ ] Graceful failure — unavailability does not break anything downstream
-- [ ] **No bulk-harvest code path exists**
+**Impact:** none on the core pitch. Layer 2 (Gemini) was always the sole bootstrap source; TrustPositif was corroboration only, never a dependency (PRD §4, §14 risk #2).
 
-**Technical Notes**
+~~**Acceptance Criteria**~~
 
-- File: `core/trustpositif.go`
-- `net/http` + `golang.org/x/net/html` for scraping (no official API, §5) — or a minimal regex-based parser to avoid a new dependency
-- **Masking is why this is verify-only.** Public results come back as `a*****gacor.biz` — unusable for WHOIS, DNS, or fingerprinting. Masking is irrelevant when _we_ supply the full string and only need yes/no back.
-- IP-restricted to Indonesia (§5) — team is in-country; don't develop through a VPN.
-- **Not on the critical path anymore.** Under the old plan this was the #1 risk (bulk-seeding L1). Now Layer 2 bootstraps L1 and TrustPositif is corroboration. Do not let it consume T+2–T+5 like the original PJ-202 did.
-- Do not parallelize. Getting IP-banned still helps nobody.
+~~- `verify(domain) → bool`~~
+~~- Results cached to disk~~
+~~- Rate limited, configurable delay~~
+~~- Graceful failure — unavailability does not break anything downstream~~
+~~- No bulk-harvest code path exists~~
 
 ---
 
-## PJ-702 · Masked-pattern parser
+## PJ-702 · ~~Masked-pattern parser~~ — CUT
 
-**Owner:** A · **Size:** S · **Depends:** PJ-701 · **NICE-TO-HAVE**
+**Owner:** A · **Size:** S · **Depends:** PJ-701 · **🛑 CUT — depended entirely on PJ-701**
 
-**Description**
-Extract structure from `a*****gacor.biz`: first char, masked length, suffix. Stores as audit trail; optionally narrows candidate guessing.
-
-**Acceptance Criteria**
-
-- [ ] Parses masked string → `{first_char, masked_len, suffix, tld}`
-- [ ] Stored to `domains.source_masked_pattern` when a candidate derives from one
-- [ ] **Does not block anything** — if cut, nothing downstream breaks
-
-**Technical Notes**
-
-- File: `core/trustpositif.go`
-- The mask leaks real constraints: exact prefix char, exact segment length, exact suffix. Enough to narrow blind combinatorics to constrained guessing.
-- **Nice-to-have (§6).** Build only if green at T+16. The system bootstraps from Layer 2 regardless.
+**Why cut:** existed only to feed constrained guesses into the TrustPositif verifier (PJ-701), which is cut. Nothing to parse without live verification to check the guesses against.
 
 ---
 
@@ -949,7 +930,7 @@ Record the full run while it works. Not at T+23 when it doesn't.
 
 ## PJ-805 · Verify cached-data demo path
 
-**Owner:** D · **Size:** M · **Depends:** PJ-205, PJ-701
+**Owner:** D · **Size:** M · **Depends:** PJ-205
 
 **Description**
 Prove the demo runs with zero live external API calls.
@@ -957,14 +938,14 @@ Prove the demo runs with zero live external API calls.
 **Acceptance Criteria**
 
 - [ ] Gemini key deliberately invalidated → cached verdicts serve → demo works
-- [ ] TrustPositif unreachable → demo unaffected
 - [ ] Neither failure visible to a viewer
 - [ ] Documented in `demo_script.md`
 
 **Technical Notes**
 
-- PRD §14 risks #3, #4.
-- **Gemini matters more than TrustPositif now.** Under cold start, Layer 2 _is_ the bootstrap — Gemini down means no system, where TrustPositif down means only "no corroboration." Test the Gemini path harder.
+- PRD §14 risk #4.
+- ~~TrustPositif unreachable → demo unaffected~~ — moot, TrustPositif is cut entirely (PJ-701, §14 risk #2). `/trustpositif/verify` is a stub with no external call to fail.
+- **Gemini is the whole bootstrap now.** Under cold start, Layer 2 _is_ the bootstrap — Gemini down means no system. Test this path harder than anything else.
 - Break things deliberately. A path assumed to work is a path that doesn't.
 
 ---
