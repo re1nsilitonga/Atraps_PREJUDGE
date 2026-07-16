@@ -426,6 +426,12 @@ func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore, extractor
 		})
 	})
 
+	// PJ-701 CUT (team decision): trustpositif.komdigi.go.id's search form
+	// requires solving a Google reCAPTCHA token before it accepts a query —
+	// there is no way to automate this without a CAPTCHA bypass, which the
+	// project's own rules already forbid for aduankonten.id (PRD §6 "NOT
+	// building") and we're applying the same line here. This endpoint stays
+	// a permanent stub, not a TODO — do not attempt a scraper against it.
 	mux.HandleFunc("POST /api/v1/trustpositif/verify", func(w http.ResponseWriter, r *http.Request) {
 		var body TrustPositifVerifyRequest
 		_ = json.NewDecoder(r.Body).Decode(&body)
