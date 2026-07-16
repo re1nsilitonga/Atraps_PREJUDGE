@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	defaultModel   = "gemini-2.0-flash"
+	defaultModel   = "gemini-3.5-flash"
 	geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s"
 
 	// PRD.md §4: "Apakah ini situs judi online? Ya/tidak, alasan singkat."

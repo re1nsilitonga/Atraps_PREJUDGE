@@ -97,6 +97,9 @@ func (noopClusterLister) ListClusters(ctx context.Context) ([]layer1.Cluster, er
 
 func newMux() http.Handler {
 	vision := layer2.NewVisionClient(os.Getenv("GEMINI_API_KEY"))
+	if model := os.Getenv("GEMINI_MODEL"); model != "" {
+		vision.Model = model
+	}
 	store := newMemoryDomainStore()
 
 	var clusters clusterLister = noopClusterLister{}
