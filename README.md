@@ -25,7 +25,7 @@ Binding contract per PRD.md §10. Backend returns hardcoded stub responses match
 | GET | `/domains/{id}` | — | `{domain, detections[], whois, cluster, siblings[], evidence_url}` |
 | POST | `/report-false-positive` | `{domain_id, note}` | `{ok:true}` |
 | GET | `/bootstrap/latest` | — | `{l2_confirmations, l1_preemptive_catches, l1_misses, ratio}` |
-| POST | `/trustpositif/verify` | `{domain}` | `{domain, is_blocked}` |
+| POST | `/trustpositif/verify` | `{domain}` | `{domain, is_blocked}` — **always `false`, permanent stub, see below** |
 
 **Module boundary:**
 
@@ -34,6 +34,8 @@ Binding contract per PRD.md §10. Backend returns hardcoded stub responses match
 - **Presentation** (dashboard): `/domains`, `/domains/{id}`, `/bootstrap/latest`
 
 **Realtime channel (one Blocker adapter, not the architecture):** Supabase `postgres_changes` on `domains`, filter `status=eq.blocked`.
+
+**TrustPositif verifier cut (team decision):** `trustpositif.komdigi.go.id`'s search form requires a Google reCAPTCHA token, which cannot be automated without a CAPTCHA bypass — forbidden by the same rule that already blocks auto-submitting to aduankonten.id (PRD §6). PJ-701/PJ-702 are cut; `/trustpositif/verify` stays in the contract as a permanent stub (`is_blocked: false`) so the Blocker/Presentation code paths that call it don't need special-casing. Never claim TrustPositif corroboration in the pitch or dashboard.
 
 ## Environment Variables
 

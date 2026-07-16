@@ -89,10 +89,12 @@ The MVP ships as a Chrome extension, but the system is deliberately split so the
 
 TrustPositif has no bulk export/API, and its public results are **masked**: `a*****gacor.biz`. That string cannot be WHOIS'd, DNS-resolved, or fingerprinted. Bulk-harvesting exact confirmed domains as ground truth is not available.
 
-TrustPositif's real role is narrower and still valuable:
+TrustPositif's real role was meant to be narrower and still valuable:
 
-- **Verifier, not source.** Submit a _full_ candidate domain → get a boolean. Masking is irrelevant when you already know what you sent.
-- **Pattern constraint.** `a*****gacor.biz` reveals first character, exact masked-segment length, and exact suffix. That narrows candidate generation from blind combinatorics to constrained guessing.
+- ~~**Verifier, not source.** Submit a _full_ candidate domain → get a boolean. Masking is irrelevant when you already know what you sent.~~
+- ~~**Pattern constraint.** `a*****gacor.biz` reveals first character, exact masked-segment length, and exact suffix. That narrows candidate generation from blind combinatorics to constrained guessing.~~
+
+**Update — cut entirely (team decision, post-implementation):** even the narrow verifier role above turned out unbuildable. `trustpositif.komdigi.go.id`'s search form requires solving a Google reCAPTCHA token client-side before a query is accepted; there is no automatable path that isn't a CAPTCHA bypass, and this project already forbids that class of workaround for aduankonten.id (§6). So TrustPositif has **zero role in the shipped system** — not source, not verifier. `/trustpositif/verify` exists in the API contract only as a permanent stub. This does not weaken the core pitch: Layer 2 (Gemini) was already the sole bootstrap source, and TrustPositif was always corroboration, never a dependency.
 
 **Blocking:** Chrome Manifest V3 `declarativeNetRequest` + Supabase realtime subscription (one Blocker adapter). Confirmation on one device broadcasts to all devices within seconds.
 
@@ -162,11 +164,14 @@ The honest pitch line: _B2C is free because users are the sensor network. The as
 8. **Blocker adapter (Chrome)** — `declarativeNetRequest` + Supabase realtime, consuming the Core verdict contract
 9. **Presentation — block page** — score + plain-language reason from `matched_fields`
 10. **Presentation — dashboard** — detected domains, confidence, source, cluster siblings, cold-start growth view
-11. **TrustPositif verifier** — per-domain full-string boolean check. **Verifier, not seed source.**
+
+### Cut (team decision — see §14 risk #2)
+
+- ~~**TrustPositif verifier** — per-domain full-string boolean check.~~ **Cut.** The search form at `trustpositif.komdigi.go.id` requires solving a Google reCAPTCHA token; there is no automatable path that isn't a CAPTCHA bypass, which this project already forbids for aduankonten.id. `/trustpositif/verify` ships as a permanent stub (`is_blocked: false`), not a real check. Never claim TrustPositif corroboration in the pitch or dashboard.
 
 ### Nice-to-have (only if ahead of schedule at T+16)
 
-- Masked-pattern-constrained candidate generator (`a*****gacor.biz` → constrained guesses → TrustPositif verify)
+- ~~Masked-pattern-constrained candidate generator~~ — **cut alongside the verifier above**; it existed only to feed TrustPositif verify.
 - Auto-generate report package → send to WA Chatbot Stop Judi Online (0811-1001-5080)
 - Affiliate network graph visualization (**mock data — must be labeled mock on screen**)
 
@@ -410,7 +415,7 @@ Open dashboard → detected list (domain, confidence, L1/L2, time)
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `fingerprint_clusters.first/last_registration_date`, `registration_window_hours`, `registration_burst_score` | **Bulk-registration detection had no home.** PRD §4 named it, §7's wireframe promises "Registered in bulk, 3 days ago" — nothing aggregated it. These four fields are the whole gap. |
 | `domains.matched_fields jsonb`                                                                               | The block page's "Why?" bullets need the matched field list. Previously implied but unstored.                                                                                        |
-| `domains.source_masked_pattern`                                                                              | Audit trail: which TrustPositif masked string (`a*****gacor.biz`) produced this candidate. Nullable — only set for pattern-derived candidates.                                       |
+| `domains.source_masked_pattern`                                                                              | Audit trail: which TrustPositif masked string (`a*****gacor.biz`) produced this candidate. **Dead column since the TrustPositif cut (§6) — kept in the frozen schema rather than migrated out mid-hackathon; always `NULL` in practice.**                                       |
 | `detections.screenshot_url` → `evidence_url`                                                                 | Core Engine must not assume evidence is a screenshot. Android VpnService has no pixels. Rename now; renaming later is a migration during a hackathon.                                |
 | `validation_runs` → `bootstrap_runs`                                                                         | Held-out validation is dead (no bulk ground truth). Replaced by cold-start proof: N confirmations → M preemptive catches.                                                            |
 
@@ -439,11 +444,11 @@ Base: `/api/v1`
 | `GET`  | `/domains/{id}`          | —                             | `{domain, detections[], whois, cluster, siblings[], evidence_url}`  | A     |
 | `POST` | `/report-false-positive` | `{domain_id, note}`           | `{ok:true}`                                                         | A     |
 | `GET`  | `/bootstrap/latest`      | —                             | `{l2_confirmations, l1_preemptive_catches, l1_misses, ratio}`       | A     |
-| `POST` | `/trustpositif/verify`   | `{domain}`                    | `{domain, is_blocked}` — **single full domain, verifier only**      | A     |
+| `POST` | `/trustpositif/verify`   | `{domain}`                    | `{domain, is_blocked}` — **permanent stub, always `false` (cut, §6 — reCAPTCHA)** | A     |
 
 **Removed from the original plan:**
 
-- `POST /trustpositif/bulk-check` — bulk harvesting is dead (masked results, no bulk export). Replaced by `/trustpositif/verify`, single-domain, verifier role only.
+- `POST /trustpositif/bulk-check` — bulk harvesting is dead (masked results, no bulk export). Replaced by `/trustpositif/verify` — which is itself now a permanent stub (§6): the site's search form requires a reCAPTCHA token, unautomatable without a bypass.
 - `GET /validation/latest` — replaced by `/bootstrap/latest` (cold-start proof, not held-out validation).
 
 **Core Engine boundary:** `/analyze`, `/fingerprint` are Core. `/blocklist`, `/check` are the Blocker adapter's read surface. `/domains`, `/bootstrap/latest` are Presentation's. A Core function must never import a Chrome API or a realtime client.
@@ -472,8 +477,8 @@ prejudge/
 │   ├── layer2/               ← B ONLY
 │   │   ├── vision.go         ← Gemini client (evidence → verdict)
 │   │   └── decide.go         ← threshold logic → emit verdict
-│   ├── feedback.go           ← L2 verdict → L1 cluster seeding (THE LOOP)
-│   └── trustpositif.go       ← single-domain verifier + masked-pattern parser
+│   └── feedback.go           ← L2 verdict → L1 cluster seeding (THE LOOP)
+│   (no trustpositif.go — cut, §6: reCAPTCHA blocks automation; /trustpositif/verify is a stub in api/main.go)
 │
 ├── api/                      ← TRANSPORT — OWNER: A
 │   ├── main.go                ← Go net/http. Thin. Calls core/, returns verdicts.
@@ -574,8 +579,8 @@ Blocks of ~4h. `T+0` = start.
 | #   | Risk                                                                                                                                                                                                                            | Likelihood              | Fallback                                                                                                                                                                                                                                                                                                                                                                                    |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **Cold start produces too few clusters to demo Layer 1** — the new #1 risk. Bulk seeding is gone; if Layer 2 confirmations don't yield a cluster with siblings, there is no preemptive beat and the pitch loses its core claim. | **High**                | Bootstrap deliberately: run Layer 2 over a curated set of same-network judol domains at T+12–14 (PJ-306's cache work doubles as this). Verify ≥1 cluster reaches ≥5 members. **If no cluster forms by T+14, the demo becomes Layer 2 + propagation only and the Layer 1 beat is cut** — decide this at T+14, not on stage.                                                                  |
-| 2   | **TrustPositif results are masked** (`a*****gacor.biz`)                                                                                                                                                                         | **Certain — confirmed** | Not a risk, a constraint. Verifier role only (full domain in → boolean out). Never claim bulk import. Masked-pattern-constrained generation is nice-to-have, not a dependency.                                                                                                                                                                                                              |
-| 3   | **TrustPositif rate-limits / IP-restricts**                                                                                                                                                                                     | Medium                  | Reduced impact under cold start — it's no longer on the critical path. Cache all verify results. If unavailable entirely, the demo still works: Layer 2 is the bootstrap, not TrustPositif.                                                                                                                                                                                                 |
+| 2   | **TrustPositif verifier is unbuildable — the search form requires solving a Google reCAPTCHA token client-side**                                                                                                                                                                        | **Certain — confirmed, resolved by cutting the feature** | Not a risk anymore, a closed decision. PJ-701/PJ-702 cut entirely (not just bulk import — even the single-domain verify). `/trustpositif/verify` ships as a permanent stub (`is_blocked: false`). No automation attempted — a CAPTCHA bypass is the same forbidden move as auto-submitting to aduankonten.id. Doesn't weaken the demo: Layer 2 was always the sole bootstrap source, TrustPositif was only ever corroboration.                                                                                                                                                                                                              |
+| 3   | ~~**TrustPositif rate-limits / IP-restricts**~~                                                                                                                                                                                     | Moot                  | The verifier is cut entirely (risk #2) — there are no live calls to rate-limit.                                                                                                                                                                                 |
 | 4   | **Gemini API quota / latency** — now higher stakes, since Layer 2 _is_ the bootstrap                                                                                                                                            | **High**                | Cache verdicts per domain. Pre-run Layer 2 on all demo domains at T+14 and cache. Live call reads cache on failure. **Gemini being down at demo = no bootstrap = no system.**                                                                                                                                                                                                               |
 | 5   | **Supabase realtime doesn't fire**                                                                                                                                                                                              | Medium                  | Polling adapter (§8). Visually identical to a judge. **Build at T+8, not T+22.** Both are adapters behind the Core contract — swapping is a flag flip, not a rewrite.                                                                                                                                                                                                                       |
 | 6   | **Venue wifi dies / captive portal**                                                                                                                                                                                            | **High**                | Everything local: cached data, fallback video on desktop. Phone hotspot tested at T+21. Captive portals kill websockets → polling adapter is the answer.                                                                                                                                                                                                                                    |
@@ -659,7 +664,7 @@ Blocks of ~4h. `T+0` = start.
 - [ ] PREDATOR citation exact: Hao, Kantchelian, Miller, Paxson, Feamster — ACM CCS 2016 (**not** University of Houston)
 - [ ] NXDomain side-channel (99%), DGA reverse-engineering (99.93% AUC), WhoisXML "300k/day" — **cut from deck unless independently verified**
 - [ ] No claim of existing partnership with Kominfo/Komdigi/OJK/PPATK anywhere in deck or demo
-- [ ] **No claim of bulk-importing TrustPositif.** Results are masked (`a*****gacor.biz`); we use it as a per-domain verifier only.
+- [ ] **No claim of TrustPositif involvement at all** — no bulk import, no live per-domain verification. It's cut (reCAPTCHA, §6); `/trustpositif/verify` is a stub. Corroboration claims involving TrustPositif in the deck or demo are fabrication.
 - [ ] **Cold-start numbers on the dashboard are live counters from `bootstrap_runs`**, not invented figures
 - [ ] **Fixtures purged from the DB** — the opening beat is an empty database (§14 risk #12)
 - [ ] **Layer 2 demo domain confirmed absent from blocklist** immediately before demo (§14 risk #13)

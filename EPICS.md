@@ -98,10 +98,10 @@ Replaces the dead held-out-validation plan (bulk ground truth is unavailable —
 
 - Bootstrap script: empty DB → N Layer 2 confirmations → M Layer 1 preemptive catches
 - **Leakage assertion**: a Layer 2-confirmed domain can never count as a Layer 1 catch
-- TrustPositif per-domain verifier (full string in → boolean out). **Verifier, not seed source.**
+- ~~TrustPositif per-domain verifier~~ — **cut (team decision).** `trustpositif.komdigi.go.id`'s search form requires a reCAPTCHA token; not automatable without a bypass, which this project forbids (same rule as aduankonten.id). `/trustpositif/verify` is a permanent stub.
 - Write results to `bootstrap_runs`
 
-**Maps to:** §6 (validation methodology) · Must-have #11 · Endpoints `/bootstrap/latest`, `/trustpositif/verify`
+**Maps to:** §6 (validation methodology) · Endpoint `/bootstrap/latest`
 **Owner:** A/B shared
 
 ---
