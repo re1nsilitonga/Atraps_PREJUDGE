@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"prejudge/core/layer2"
 )
 
 func doJSON(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
@@ -68,6 +71,52 @@ func TestAnalyzeReturnsDomainID(t *testing.T) {
 	if _, ok := body["domain_id"]; !ok {
 		t.Fatal("missing domain_id")
 	}
+}
+
+func TestAnalyzeWithVisionClientAppliesThreshold(t *testing.T) {
+	geminiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"is_judol\":true,\"confidence\":0.95,\"reason\":\"slot UI, tombol deposit\"}"}]}}]}`))
+	}))
+	t.Cleanup(geminiSrv.Close)
+
+	vision := layer2.NewVisionClient("test-key")
+	vision.Endpoint = geminiSrv.URL
+	store := newMemoryDomainStore()
+	mux := newMuxWith(vision, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/analyze", strings.NewReader(`{"domain":"gacor88x.xyz","evidence_b64":"Zm9v"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if body["is_judol"] != true {
+		t.Fatalf("expected is_judol true, got %v", body)
+	}
+	if body["confidence"].(float64) != 0.95 {
+		t.Fatalf("expected confidence 0.95, got %v", body["confidence"])
+	}
+
+	// Feedback loop runs in a goroutine (PJ-204) — poll briefly for the
+	// domain to land in the store instead of sleeping a fixed duration.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		store.mu.Lock()
+		_, blocked := store.blocked["gacor88x.xyz"]
+		store.mu.Unlock()
+		if blocked {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("expected domain to be blocked via async feedback loop")
 }
 
 func TestFingerprintNoMatchIsCleanNot500(t *testing.T) {
