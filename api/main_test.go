@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,8 +9,27 @@ import (
 	"testing"
 	"time"
 
+	"prejudge/core/layer1"
 	"prejudge/core/layer2"
 )
+
+type fakeExtractor struct {
+	fp  layer1.Fingerprint
+	err error
+}
+
+func (f fakeExtractor) Extract(ctx context.Context, domain string) (layer1.Fingerprint, error) {
+	return f.fp, f.err
+}
+
+type fakeClusterLister struct {
+	clusters []layer1.Cluster
+	err      error
+}
+
+func (f fakeClusterLister) ListClusters(ctx context.Context) ([]layer1.Cluster, error) {
+	return f.clusters, f.err
+}
 
 func doJSON(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -83,7 +103,7 @@ func TestAnalyzeWithVisionClientAppliesThreshold(t *testing.T) {
 	vision := layer2.NewVisionClient("test-key")
 	vision.Endpoint = geminiSrv.URL
 	store := newMemoryDomainStore()
-	mux := newMuxWith(vision, store)
+	mux := newMuxWith(vision, store, fakeExtractor{}, fakeClusterLister{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/analyze", strings.NewReader(`{"domain":"gacor88x.xyz","evidence_b64":"Zm9v"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -127,6 +147,32 @@ func TestFingerprintNoMatchIsCleanNot500(t *testing.T) {
 	body := decode(t, rr)
 	if body["cluster_id"] != nil {
 		t.Fatalf("expected nil cluster_id, got %v", body["cluster_id"])
+	}
+}
+
+func TestFingerprintMatchReturnsMatchedFields(t *testing.T) {
+	ip := "203.0.113.10"
+	burst := 0.9
+	vision := layer2.NewVisionClient("")
+	store := newMemoryDomainStore()
+	extractor := fakeExtractor{fp: layer1.Fingerprint{Domain: "sib.test", HostingIP: &ip, TLD: "xyz"}}
+	clusters := fakeClusterLister{clusters: []layer1.Cluster{
+		{ID: "cluster-1", HostingIP: ip, TLD: "xyz", RegistrationBurstScore: &burst},
+	}}
+	mux := newMuxWith(vision, store, extractor, clusters)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/fingerprint", strings.NewReader(`{"domain":"sib.test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	body := decode(t, rr)
+	if body["cluster_id"] != "cluster-1" {
+		t.Fatalf("expected cluster-1, got %v", body["cluster_id"])
+	}
+	fields, _ := body["matched_fields"].([]any)
+	if len(fields) == 0 {
+		t.Fatal("expected non-empty matched_fields")
 	}
 }
 
