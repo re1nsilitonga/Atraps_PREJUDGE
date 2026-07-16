@@ -5,11 +5,69 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"sync"
 	"time"
+
+	"prejudge/core"
+	"prejudge/core/layer2"
 )
+
+// memoryDomainStore is a placeholder layer2.DomainStore until the real
+// Postgres/Supabase-backed store lands (Epic 1, owner A). It exists so
+// PJ-204's /analyze wiring can be exercised end-to-end without a DB
+// dependency; swap this out, not the handler, once the real store exists.
+type memoryDomainStore struct {
+	mu       sync.Mutex
+	blocked  map[string]core.Verdict
+	domainID map[string]string
+}
+
+func newMemoryDomainStore() *memoryDomainStore {
+	return &memoryDomainStore{
+		blocked:  map[string]core.Verdict{},
+		domainID: map[string]string{},
+	}
+}
+
+func (s *memoryDomainStore) UpsertBlocked(v core.Verdict) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blocked[v.Domain] = v
+	s.idFor(v.Domain)
+	return nil
+}
+
+func (s *memoryDomainStore) LogDetection(domain string, layer int, confidence float64, reason string, raw json.RawMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.idFor(domain)
+	return nil
+}
+
+// idFor assigns a stable random id to a domain on first sight. Caller must
+// hold s.mu.
+func (s *memoryDomainStore) idFor(domain string) string {
+	if id, ok := s.domainID[domain]; ok {
+		return id
+	}
+	buf := make([]byte, 16)
+	_, _ = rand.Read(buf)
+	id := hex.EncodeToString(buf)
+	s.domainID[domain] = id
+	return id
+}
+
+func (s *memoryDomainStore) IDFor(domain string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.idFor(domain)
+}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -18,6 +76,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func newMux() http.Handler {
+	vision := layer2.NewVisionClient(os.Getenv("GEMINI_API_KEY"))
+	store := newMemoryDomainStore()
+	return newMuxWith(vision, store)
+}
+
+// newMuxWith builds the router with explicit dependencies, so tests can
+// inject a fake Gemini endpoint / store without touching env vars.
+func newMuxWith(vision *layer2.VisionClient, store *memoryDomainStore) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/blocklist", func(w http.ResponseWriter, r *http.Request) {
@@ -32,11 +98,54 @@ func newMux() http.Handler {
 	})
 
 	mux.HandleFunc("POST /api/v1/analyze", func(w http.ResponseWriter, r *http.Request) {
+		var body AnalyzeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+
+		// No key configured (e.g. local dev without .env): stay on the
+		// PJ-106 stub shape rather than fail every request.
+		if vision.APIKey == "" {
+			writeJSON(w, http.StatusOK, AnalyzeResponse{
+				IsJudol:    false,
+				Confidence: 0,
+				Reason:     "stub",
+				DomainID:   "00000000-0000-0000-0000-000000000000",
+			})
+			return
+		}
+
+		result, err := vision.Analyze(r.Context(), core.Evidence{
+			Domain:       body.Domain,
+			EvidenceB64:  body.EvidenceB64,
+			EvidenceType: core.EvidenceScreenshot,
+		})
+		if err != nil {
+			// PRD §14 risk #4: Gemini down must not take the endpoint down.
+			log.Printf("layer2 analyze failed for %s: %v", body.Domain, err)
+			writeJSON(w, http.StatusOK, AnalyzeResponse{
+				IsJudol:    false,
+				Confidence: 0,
+				Reason:     "analisis gagal, coba lagi nanti",
+				DomainID:   store.IDFor(body.Domain),
+			})
+			return
+		}
+
+		// PJ-204: feedback loop (PJ-301) fires in the background so it
+		// never delays the response.
+		go func() {
+			if err := layer2.Decide(store, result); err != nil {
+				log.Printf("layer2 decide failed for %s: %v", body.Domain, err)
+			}
+		}()
+
 		writeJSON(w, http.StatusOK, AnalyzeResponse{
-			IsJudol:    false,
-			Confidence: 0,
-			Reason:     "stub",
-			DomainID:   "00000000-0000-0000-0000-000000000000",
+			IsJudol:    result.Verdict.IsJudol,
+			Confidence: result.Verdict.Confidence,
+			Reason:     result.Verdict.Reason,
+			DomainID:   store.IDFor(body.Domain),
 		})
 	})
 
