@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"prejudge/core"
 )
 
 type BlocklistDomain struct {
@@ -256,6 +258,82 @@ func (r *DomainRepository) BootstrapLatest(ctx context.Context) (*BootstrapRun, 
 		return nil, nil
 	}
 	return &run, nil
+}
+
+// EnsureDomain returns the id of domain, inserting a status='candidate' row
+// if none exists yet. Called synchronously from the /analyze handler (PJ-204)
+// because the response contract requires domain_id in the same response —
+// unlike UpsertBlocked/LogDetection/ListConfirmed below, this cannot run in
+// the background goroutine.
+func (r *DomainRepository) EnsureDomain(ctx context.Context, domain string) (string, error) {
+	var id string
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO domains (domain, status) VALUES ($1, 'candidate')
+		ON CONFLICT (domain) DO UPDATE SET domain = EXCLUDED.domain
+		RETURNING id
+	`, domain).Scan(&id)
+	return id, err
+}
+
+// UpsertBlocked marks domain as status='blocked' with the verdict's
+// source/confidence/reason/matched_fields. Idempotent on domain (PJ-203: "no
+// dupes on repeat visits") via the same ON CONFLICT upsert as EnsureDomain.
+func (r *DomainRepository) UpsertBlocked(ctx context.Context, verdict core.Verdict) error {
+	matchedFields, err := json.Marshal(verdict.MatchedFields)
+	if err != nil {
+		return err
+	}
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO domains (domain, status, source, confidence, reason, matched_fields, blocked_at)
+		VALUES ($1, 'blocked', $2::detection_source, $3, $4, $5::jsonb, now())
+		ON CONFLICT (domain) DO UPDATE SET
+			status = 'blocked', source = EXCLUDED.source, confidence = EXCLUDED.confidence,
+			reason = EXCLUDED.reason, matched_fields = EXCLUDED.matched_fields, blocked_at = now()
+	`, verdict.Domain, string(verdict.Source), verdict.Confidence, verdict.Reason, string(matchedFields))
+	return err
+}
+
+// LogDetection appends a detections row regardless of threshold outcome
+// (core/layer2/decide.go's DomainStore contract). Self-ensures the parent
+// domains row exists first — detections.domain_id is FK NOT NULL — so this
+// is safe to call even if EnsureDomain wasn't (or couldn't have been)
+// called first for this particular domain.
+func (r *DomainRepository) LogDetection(ctx context.Context, domain string, layer int, confidence float64, reason string, raw json.RawMessage) error {
+	domainID, err := r.EnsureDomain(ctx, domain)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		raw = json.RawMessage("null")
+	}
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO detections (domain_id, layer, confidence, reason, raw_response)
+		VALUES ($1::uuid, $2, $3, $4, $5::jsonb)
+	`, domainID, layer, confidence, reason, string(raw))
+	return err
+}
+
+// ListConfirmed returns domains Layer 2 has confirmed (source='L2',
+// status='blocked') — the feedback loop's (core/feedback.go, PJ-301) input
+// set, and the leakage-assertion boundary for PJ-703's cold-start proof.
+func (r *DomainRepository) ListConfirmed(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT domain FROM domains WHERE source = 'L2' AND status = 'blocked'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var domains []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		domains = append(domains, d)
+	}
+	return domains, rows.Err()
 }
 
 func decodeStringSlice(raw []byte) []string {
