@@ -1,6 +1,7 @@
 package layer2
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -12,12 +13,12 @@ type fakeStore struct {
 	detections int
 }
 
-func (f *fakeStore) UpsertBlocked(v core.Verdict) error {
+func (f *fakeStore) UpsertBlocked(ctx context.Context, v core.Verdict) error {
 	f.blocked = append(f.blocked, v)
 	return nil
 }
 
-func (f *fakeStore) LogDetection(domain string, layer int, confidence float64, reason string, raw json.RawMessage) error {
+func (f *fakeStore) LogDetection(ctx context.Context, domain string, layer int, confidence float64, reason string, raw json.RawMessage) error {
 	f.detections++
 	return nil
 }
@@ -29,7 +30,7 @@ func TestDecideAboveThresholdBlocksDomain(t *testing.T) {
 		Raw:     `{"is_judol":true}`,
 	}
 
-	if err := Decide(store, result); err != nil {
+	if err := Decide(context.Background(), store, result); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(store.blocked) != 1 {
@@ -47,7 +48,7 @@ func TestDecideBelowThresholdOnlyLogs(t *testing.T) {
 		Raw:     `{"is_judol":true}`,
 	}
 
-	if err := Decide(store, result); err != nil {
+	if err := Decide(context.Background(), store, result); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(store.blocked) != 0 {
@@ -65,7 +66,7 @@ func TestDecideNotJudolNeverBlocks(t *testing.T) {
 		Raw:     `{"is_judol":false}`,
 	}
 
-	if err := Decide(store, result); err != nil {
+	if err := Decide(context.Background(), store, result); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(store.blocked) != 0 {

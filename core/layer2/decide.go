@@ -1,6 +1,7 @@
 package layer2
 
 import (
+	"context"
 	"encoding/json"
 
 	"prejudge/core"
@@ -20,21 +21,21 @@ type DomainStore interface {
 	// UpsertBlocked marks domain as status='blocked', source='L2' with the
 	// verdict's reason/matched_fields. Must be idempotent on domain — no
 	// dupes on repeat visits.
-	UpsertBlocked(verdict core.Verdict) error
+	UpsertBlocked(ctx context.Context, verdict core.Verdict) error
 	// LogDetection appends a detections row regardless of threshold outcome.
-	LogDetection(domain string, layer int, confidence float64, reason string, raw json.RawMessage) error
+	LogDetection(ctx context.Context, domain string, layer int, confidence float64, reason string, raw json.RawMessage) error
 }
 
 // Decide applies the L2 threshold to a vision AnalyzeResult and writes
 // through store. Above threshold: domains flips to blocked. Below (or not
 // judol at all): only the detection is logged, domains.status is untouched.
-func Decide(store DomainStore, result AnalyzeResult) error {
+func Decide(ctx context.Context, store DomainStore, result AnalyzeResult) error {
 	raw := json.RawMessage(result.Raw)
 	if len(raw) == 0 {
 		raw = json.RawMessage("null")
 	}
 
-	if err := store.LogDetection(result.Verdict.Domain, 2, result.Verdict.Confidence, result.Verdict.Reason, raw); err != nil {
+	if err := store.LogDetection(ctx, result.Verdict.Domain, 2, result.Verdict.Confidence, result.Verdict.Reason, raw); err != nil {
 		return err
 	}
 
@@ -42,5 +43,5 @@ func Decide(store DomainStore, result AnalyzeResult) error {
 		return nil
 	}
 
-	return store.UpsertBlocked(result.Verdict)
+	return store.UpsertBlocked(ctx, result.Verdict)
 }
