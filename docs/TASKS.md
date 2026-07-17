@@ -1,4 +1,4 @@
-# PREJUDGE — Task Backlog
+# PRIME — Task Backlog
 
 Granular tickets derived from EPICS.md. Scope is strictly MVP must-haves + demo reliability.
 

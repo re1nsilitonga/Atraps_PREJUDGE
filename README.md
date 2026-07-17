@@ -9,11 +9,11 @@
 | **C** | Frontend (Extension + Dashboard) | `extension/`, `dashboard/` | Working two-device realtime block + dashboard |
 | **D** | Pitch, Research & QA | `pitch/`, source verification, demo rehearsal | 2-min deck + demo script + verified `sources.md` |
 
-See [PRD.md](PRD.md) §12 for load-balancing notes and full context.
+See [PRD.md](docs/PRD.md) §12 for load-balancing notes and full context.
 
 ## API Contract (`/api/v1`)
 
-Binding contract per PRD.md §10. Backend returns hardcoded stub responses matching these shapes from T+2 (PJ-106) so Frontend is never blocked. Changes after T+4 require all four team members.
+Binding contract per docs/PRD.md §10. Backend returns hardcoded stub responses matching these shapes from T+2 (PJ-106) so Frontend is never blocked. Changes after T+4 require all four team members.
 
 | Method | Endpoint | Request | Response |
 | --- | --- | --- | --- |

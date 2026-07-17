@@ -1,4 +1,4 @@
-# PREJUDGE — 24-Hour Hackathon PRD
+# PRIME — 24-Hour Hackathon PRD
 
 **GarudaHacks 7.0 · Track: Safety**
 
@@ -6,10 +6,10 @@
 
 ## 1. Project Brief
 
-**Product name:** PREJUDGE
+**Product name:** PRIME
 **Tagline:** _Block the domain before it does damage — not after it goes viral._
 
-PREJUDGE starts with an empty database and builds its own blocklist: one vision-confirmed judol site yields an infrastructure fingerprint, and that fingerprint preemptively blocks its siblings — domains nobody has ever visited. Every confirmation propagates to all devices in real time, so one user's exposure protects everyone, and the system gets more preemptive the more it's used.
+PRIME starts with an empty database and builds its own blocklist: one vision-confirmed judol site yields an infrastructure fingerprint, and that fingerprint preemptively blocks its siblings — domains nobody has ever visited. Every confirmation propagates to all devices in real time, so one user's exposure protects everyone, and the system gets more preemptive the more it's used.
 
 **Architecture in one line:** a portable **Core Engine** (detection) behind swappable **Blocker** adapters (Chrome today, Android VpnService next) and **Presentation** surfaces (block page, dashboard).
 
@@ -34,17 +34,17 @@ PREJUDGE starts with an empty database and builds its own blocklist: one vision-
 | Stop Judol (STMIK Banjarbaru)      | Rehab-focused, no blocking, no detection                        |
 | Gamban / BlockSite / Chrome native | Generic manual lists, not Indonesia-specific, not auto-updating |
 
-**The gap:** no Indonesian solution combines infrastructure-based preemptive detection + automatic device-level blocking + a database that **builds itself from zero**. Every existing option depends on a list someone else maintains — Kominfo's crawler, BlockSite's manual entry, TrustPositif's registry. PREJUDGE starts empty and compounds: each confirmation makes the next block cheaper.
+**The gap:** no Indonesian solution combines infrastructure-based preemptive detection + automatic device-level blocking + a database that **builds itself from zero**. Every existing option depends on a list someone else maintains — Kominfo's crawler, BlockSite's manual entry, TrustPositif's registry. PRIME starts empty and compounds: each confirmation makes the next block cheaper.
 
 ---
 
 ## 3. Target Users
 
 **Primary (B2C) — "Rina, 41, Bekasi"**
-Homemaker. Her husband started playing judol on his phone after seeing a Telegram link. She's not technical, doesn't know which sites to block, and by the time she finds one, he's on a different one. She installs PREJUDGE on the family laptop in two clicks and never touches it again. She needs to _see why_ something was blocked — a black box makes her think the extension is broken.
+Homemaker. Her husband started playing judol on his phone after seeing a Telegram link. She's not technical, doesn't know which sites to block, and by the time she finds one, he's on a different one. She installs PRIME on the family laptop in two clicks and never touches it again. She needs to _see why_ something was blocked — a black box makes her think the extension is broken.
 
 **Secondary (B2G) — Komdigi verification team**
-Receives a stream of pre-packaged reports (URL + screenshot + reason + confidence) instead of raw citizen complaints. Reduces triage load. They retain blocking authority; PREJUDGE never claims to replace them.
+Receives a stream of pre-packaged reports (URL + screenshot + reason + confidence) instead of raw citizen complaints. Reduces triage load. They retain blocking authority; PRIME never claims to replace them.
 
 **Tertiary (B2B) — ISPs, banks/e-wallets, .id registrars**
 Consume the domain feed as an additional signal.
@@ -81,7 +81,7 @@ The MVP ships as a Chrome extension, but the system is deliberately split so the
 - Detect **bulk-registration bursts** — clusters of domains registered in the same narrow window by the same registrar. _This is the actual Netcraft/PREDATOR signal: it exploits the gap between registration and campaign activation._ Correlation alone is reactive-but-clustered; the registration-window burst is what makes it genuinely preemptive.
 - Score unseen domains against known clusters → flag siblings **never visited by anyone**
 
-**The loop is the product.** Layer 2 detections feed Layer 1 fingerprints. Every confirmation makes the system more preemptive. Detection N+1 costs less than detection N. This is the answer to _"isn't this just BlockSite?"_ — BlockSite blocks a list you type in; PREJUDGE generates the list and compounds.
+**The loop is the product.** Layer 2 detections feed Layer 1 fingerprints. Every confirmation makes the system more preemptive. Detection N+1 costs less than detection N. This is the answer to _"isn't this just BlockSite?"_ — BlockSite blocks a list you type in; PRIME generates the list and compounds.
 
 **Preemptive is an algorithm, not AI — deliberately.** Layer 1 is weighted field correlation plus burst detection over registration timestamps. Deterministic arithmetic, no ML. This is a design choice with a defense: deterministic scoring yields `matched_fields`, which renders directly as the block page's "Why?" bullets. PRD §5 scores transparency; an ML classifier could not explain itself to Rina. The only AI in the system is Layer 2's vision call — and per §6, that is explicitly _not_ our innovation.
 
@@ -263,7 +263,7 @@ Open dashboard → detected list (domain, confidence, L1/L2, time)
 
 ```
 ┌──────────────────────────────────────────┐
-│              🛡  PREJUDGE                 │
+│              🛡  PRIME                    │
 │                                          │
 │      Situs ini diblokir                   │
 │      gacor88x.xyz                         │
@@ -286,7 +286,7 @@ Open dashboard → detected list (domain, confidence, L1/L2, time)
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│ PREJUDGE  │ Terdeteksi │ Cold Start │ Jaringan         │
+│ PRIME     │ Terdeteksi │ Cold Start │ Jaringan         │
 ├────────────────────────────────────────────────────────┤
 │  Hari ini: 128    L1: 91    L2: 37       ● live        │
 ├──────────────┬───────┬────────┬────────────────────────┤
@@ -462,7 +462,7 @@ Base: `/api/v1`
 ## 11. Suggested Project Structure
 
 ```
-prejudge/
+prime/
 ├── README.md                 ← Core verdict contract + API + .env template
 ├── .env.example
 ├── go.mod                    ← single module covering core/ + api/ + db/

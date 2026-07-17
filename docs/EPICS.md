@@ -1,4 +1,4 @@
-# PREJUDGE MVP — Epics / Main Task Groups
+# PRIME MVP — Epics / Main Task Groups
 
 Derived from PRD.md §4 (Architecture), §6 (Must-have), §8 (Tech Stack), §9 (Schema), §10 (API Plan), §14 (Risks). Nice-to-haves and pitch content (deck, script, sources) excluded — this is build scope. Demo reliability _is_ build scope (Epic 8).
 
