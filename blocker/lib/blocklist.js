@@ -1,7 +1,7 @@
 // PJ-504: blocklist sync — full fetch on startup, cached in
 // chrome.storage.local so it survives service-worker restart, DNR rules
 // rebuilt from the cache immediately (no network wait before rules exist).
-import { SUPABASE_REST_URL, SUPABASE_ANON_KEY } from "./config.js";
+import { API_BASE } from "./config.js";
 import { syncRules } from "./rules.js";
 
 const CACHE_KEY = "blocklistCache"; // { [domain]: entry }
@@ -19,13 +19,10 @@ function normalize(row) {
 // fetchFull is the cold-start / worker-restart path. Empty result is the
 // normal state on a fresh install (PJ-504) — not an error.
 export async function fetchFull() {
-  const url = `${SUPABASE_REST_URL}/domains?select=id,domain,confidence,reason,matched_fields&status=eq.blocked`;
-  const res = await fetch(url, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-  });
+  const res = await fetch(`${API_BASE}/blocklist`);
   if (!res.ok) return [];
-  const rows = await res.json();
-  return rows.map(normalize);
+  const body = await res.json();
+  return (body.domains ?? []).map(normalize);
 }
 
 export async function loadCache() {

@@ -91,3 +91,29 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT SELECT ON public.domains, public.fingerprint_clusters, public.detections, public.whois_records, public.bootstrap_runs TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.domains, public.fingerprint_clusters, public.detections, public.whois_records, public.bootstrap_runs TO service_role;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+
+-- Single-source-access follow-up: the Go API is now the only client of
+-- Supabase Realtime — this trigger is what api/realtime.go's LISTEN
+-- connection subscribes to, then fans out over its own WebSocket to the
+-- Blocker. The Blocker no longer holds Supabase credentials at all.
+-- pg_notify payload keys match blocker/lib/blocklist.js's normalize()
+-- exactly, so the same function handles both the REST and WS shapes.
+CREATE OR REPLACE FUNCTION notify_domain_blocked() RETURNS trigger AS $$
+BEGIN
+    IF NEW.status = 'blocked' THEN
+        PERFORM pg_notify('domain_blocked', json_build_object(
+            'id', NEW.id,
+            'domain', NEW.domain,
+            'confidence', NEW.confidence,
+            'reason', NEW.reason,
+            'matched_fields', NEW.matched_fields
+        )::text);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS domains_notify_blocked ON domains;
+CREATE TRIGGER domains_notify_blocked
+    AFTER INSERT OR UPDATE ON domains
+    FOR EACH ROW EXECUTE FUNCTION notify_domain_blocked();

@@ -38,3 +38,44 @@ func Connect(ctx context.Context) (*pgxpool.Pool, error) {
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	return pgxpool.NewWithConfig(ctx, cfg)
 }
+
+// DirectDSNFromEnv reads DATABASE_DIRECT_URL — Supabase's non-pooled
+// connection string (port 5432), distinct from DATABASE_URL's pgbouncer
+// pooler. LISTEN/NOTIFY needs a single session-scoped connection; pgbouncer
+// in transaction mode recycles the underlying server connection between
+// statements, which silently drops a LISTEN registered on it.
+func DirectDSNFromEnv() (string, error) {
+	dsn := os.Getenv("DATABASE_DIRECT_URL")
+	if dsn == "" {
+		return "", errors.New("DATABASE_DIRECT_URL is not set (see .env.example) — required for realtime LISTEN/NOTIFY")
+	}
+	return dsn, nil
+}
+
+// ListenDomainBlocked opens a dedicated connection, LISTENs on
+// domain_blocked (see the trigger in schema.sql), and calls onNotify with
+// each payload as it arrives. Blocks until ctx is cancelled or the
+// connection breaks — callers reconnect-loop this (api/realtime.go does).
+func ListenDomainBlocked(ctx context.Context, onNotify func(payload string)) error {
+	dsn, err := DirectDSNFromEnv()
+	if err != nil {
+		return err
+	}
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	if _, err := conn.Exec(ctx, "LISTEN domain_blocked"); err != nil {
+		return err
+	}
+
+	for {
+		n, err := conn.WaitForNotification(ctx)
+		if err != nil {
+			return err
+		}
+		onNotify(n.Payload)
+	}
+}

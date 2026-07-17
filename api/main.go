@@ -194,14 +194,17 @@ func newMux() http.Handler {
 		domains = domainRepo
 	}
 
-	return newMuxWith(vision, store, layer1.NewExtractor(), clusters, clusterStore, domains)
+	hub := newRealtimeHub()
+	go runRealtimeListener(hub)
+
+	return newMuxWith(vision, store, layer1.NewExtractor(), clusters, clusterStore, domains, hub)
 }
 
 // newMuxWith builds the router with explicit dependencies, so tests can
 // inject a fake Gemini endpoint / store / fingerprint extractor / cluster
-// source / cluster store / domain repository without touching env vars or a
-// live network/DB.
-func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor fingerprintExtractor, clusters clusterLister, clusterStore core.ClusterStore, domains domainRepository) http.Handler {
+// source / cluster store / domain repository / realtime hub without
+// touching env vars or a live network/DB.
+func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor fingerprintExtractor, clusters clusterLister, clusterStore core.ClusterStore, domains domainRepository, hub *realtimeHub) http.Handler {
 	mux := http.NewServeMux()
 
 	// PJ-506: real blocklist read. `since` filters to rows blocked after
@@ -223,6 +226,7 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		entries := make([]BlocklistEntry, 0, len(rows))
 		for _, row := range rows {
 			entries = append(entries, BlocklistEntry{
+				ID:            row.ID,
 				Domain:        row.Domain,
 				Confidence:    row.Confidence,
 				Reason:        row.Reason,
@@ -234,6 +238,10 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 		})
 	})
+
+	// Single-source-access follow-up: the Blocker's only realtime
+	// transport. See api/realtime.go.
+	mux.HandleFunc("GET /api/v1/realtime", hub.serveWS)
 
 	// PJ-506: an unknown domain is not an error — it reports "candidate",
 	// the same shape as any domain not yet confirmed.

@@ -15,6 +15,7 @@ import (
 )
 
 type BlocklistDomain struct {
+	ID            string
 	Domain        string
 	Confidence    float64
 	Reason        string
@@ -72,7 +73,7 @@ func NewDomainRepository(pool *pgxpool.Pool) *DomainRepository {
 // blocked after `since` (PJ-506: "since actually filters").
 func (r *DomainRepository) Blocklist(ctx context.Context, since *time.Time) ([]BlocklistDomain, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT domain, COALESCE(confidence, 0), COALESCE(reason, ''), matched_fields
+		SELECT id, domain, COALESCE(confidence, 0), COALESCE(reason, ''), matched_fields
 		FROM domains
 		WHERE status = 'blocked' AND ($1::timestamptz IS NULL OR blocked_at > $1)
 		ORDER BY blocked_at DESC
@@ -86,7 +87,7 @@ func (r *DomainRepository) Blocklist(ctx context.Context, since *time.Time) ([]B
 	for rows.Next() {
 		var d BlocklistDomain
 		var matchedFieldsRaw []byte
-		if err := rows.Scan(&d.Domain, &d.Confidence, &d.Reason, &matchedFieldsRaw); err != nil {
+		if err := rows.Scan(&d.ID, &d.Domain, &d.Confidence, &d.Reason, &matchedFieldsRaw); err != nil {
 			return nil, err
 		}
 		d.MatchedFields = decodeStringSlice(matchedFieldsRaw)

@@ -33,7 +33,7 @@ Binding contract per PRD.md §10. Backend returns hardcoded stub responses match
 - **Blocker** (Chrome adapter read surface): `/blocklist`, `/check`
 - **Presentation** (dashboard): `/domains`, `/domains/{id}`, `/bootstrap/latest`
 
-**Realtime channel (one Blocker adapter, not the architecture):** Supabase `postgres_changes` on `domains`, filter `status=eq.blocked`.
+**Realtime channel (one Blocker adapter, not the architecture):** `GET /api/v1/realtime` — the Go API's own WebSocket relay. It LISTENs on Postgres `domain_blocked` NOTIFY (fired by a trigger on `domains`, see `db/schema.sql`) and fans out to connected clients. The Blocker no longer talks to Supabase directly at all — this is the single source of access, both for reads (`/blocklist`, `/check`) and for the realtime push. See `api/realtime.go`.
 
 **TrustPositif verifier cut (team decision):** `trustpositif.komdigi.go.id`'s search form requires a Google reCAPTCHA token, which cannot be automated without a CAPTCHA bypass — forbidden by the same rule that already blocks auto-submitting to aduankonten.id (PRD §6). PJ-701/PJ-702 are cut; `/trustpositif/verify` stays in the contract as a permanent stub (`is_blocked: false`) so the Blocker/Presentation code paths that call it don't need special-casing. Never claim TrustPositif corroboration in the pitch or dashboard.
 
@@ -41,7 +41,7 @@ Binding contract per PRD.md §10. Backend returns hardcoded stub responses match
 
 See `.env.example`. Real values distributed via the team WhatsApp group, never committed.
 
-- `SUPABASE_URL` — project URL
-- `SUPABASE_ANON_KEY` — public, ships in the Blocker extension
-- `SUPABASE_SERVICE_ROLE_KEY` — never leaves `core/` + `api/`
+- `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` — never leave `api/`/`db/` now. Single-source-access change: the Blocker extension used to ship the anon key and talk to Supabase directly; it now only knows `API_BASE` and holds zero Supabase credentials.
+- `DATABASE_URL` — Supabase's pooler connection string (transaction mode), used for all normal queries.
+- `DATABASE_DIRECT_URL` — a session-scoped connection (Supabase pooler on port 5432, or a direct `db.<ref>.supabase.co:5432` connection if your network has IPv6 egress). Required for `LISTEN/NOTIFY` — the transaction-mode pooler on `DATABASE_URL` recycles the underlying server connection between statements and silently drops a session-scoped `LISTEN`. Realtime push is disabled (logged once, not fatal) if this isn't set.
 - `GEMINI_API_KEY` — Layer 2 vision calls
