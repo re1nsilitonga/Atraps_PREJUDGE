@@ -1,6 +1,8 @@
 // PJ-505: polling adapter — second transport behind the same onDomainBlocked
 // callback the realtime adapter uses, so background.js can't tell them apart.
-import { SUPABASE_REST_URL, SUPABASE_ANON_KEY, POLL_INTERVAL_MS } from "./config.js";
+// Single-source-access follow-up: hits the Go API's own /blocklist?since=
+// (already supported the cursor), not Supabase REST directly.
+import { API_BASE, POLL_INTERVAL_MS } from "./config.js";
 
 export function createPollingAdapter(onDomainBlocked) {
   let timer = null;
@@ -8,16 +10,14 @@ export function createPollingAdapter(onDomainBlocked) {
 
   async function poll() {
     try {
-      const url = `${SUPABASE_REST_URL}/domains?select=id,domain,confidence,reason,matched_fields,status,blocked_at&status=eq.blocked&blocked_at=gt.${encodeURIComponent(since)}&order=blocked_at.asc`;
-      const res = await fetch(url, {
-        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-      });
+      const url = `${API_BASE}/blocklist?since=${encodeURIComponent(since)}`;
+      const res = await fetch(url);
       if (!res.ok) return;
-      const rows = await res.json();
-      for (const row of rows) {
+      const body = await res.json();
+      for (const row of body.domains ?? []) {
         onDomainBlocked(row);
-        if (row.blocked_at > since) since = row.blocked_at;
       }
+      if (body.updated_at) since = body.updated_at;
     } catch {
       // silent — next tick retries (PJ-202 pattern: failure invisible to the user)
     }

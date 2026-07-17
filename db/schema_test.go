@@ -104,3 +104,16 @@ func TestStatusIndexExists(t *testing.T) {
 		t.Fatal("missing idx_domains_status index")
 	}
 }
+
+func TestDomainBlockedNotifyTriggerPresent(t *testing.T) {
+	schema := readSchema(t)
+	if !strings.Contains(schema, "pg_notify('domain_blocked'") {
+		t.Fatal("missing pg_notify('domain_blocked', ...) — api/realtime.go's LISTEN depends on this")
+	}
+	if !strings.Contains(schema, "CREATE TRIGGER domains_notify_blocked") {
+		t.Fatal("missing domains_notify_blocked trigger")
+	}
+	if !strings.Contains(schema, "DROP TRIGGER IF EXISTS domains_notify_blocked") {
+		t.Fatal("trigger creation must be idempotent (DROP TRIGGER IF EXISTS first)")
+	}
+}

@@ -91,7 +91,7 @@ func (f *fakeDomainRepository) BootstrapLatest(ctx context.Context) (*db.Bootstr
 }
 
 func defaultMux() http.Handler {
-	return newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, &fakeDomainRepository{})
+	return newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, &fakeDomainRepository{}, newRealtimeHub())
 }
 
 func doJSON(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
@@ -133,9 +133,9 @@ func TestBlocklistEmptyIsValidNotError(t *testing.T) {
 
 func TestBlocklistReturnsEntriesWithMatchedFields(t *testing.T) {
 	domains := &fakeDomainRepository{blocklist: []db.BlocklistDomain{
-		{Domain: "gacor88x.xyz", Confidence: 0.92, Reason: "slot UI", MatchedFields: []string{"hosting_ip", "nameserver"}},
+		{ID: "d1", Domain: "gacor88x.xyz", Confidence: 0.92, Reason: "slot UI", MatchedFields: []string{"hosting_ip", "nameserver"}},
 	}}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	rr := doJSONWith(t, mux, http.MethodGet, "/api/v1/blocklist", "")
 	body := decode(t, rr)
@@ -147,6 +147,9 @@ func TestBlocklistReturnsEntriesWithMatchedFields(t *testing.T) {
 	if entry["domain"] != "gacor88x.xyz" {
 		t.Fatalf("expected gacor88x.xyz, got %v", entry["domain"])
 	}
+	if entry["id"] != "d1" {
+		t.Fatalf("expected id d1 (needed by blocked.html's report-false-positive flow), got %v", entry["id"])
+	}
 	fields := entry["matched_fields"].([]any)
 	if len(fields) != 2 {
 		t.Fatalf("expected 2 matched_fields, got %v", fields)
@@ -155,7 +158,7 @@ func TestBlocklistReturnsEntriesWithMatchedFields(t *testing.T) {
 
 func TestBlocklistSinceQueryParamIsParsedAndForwarded(t *testing.T) {
 	domains := &fakeDomainRepository{}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	doJSONWith(t, mux, http.MethodGet, "/api/v1/blocklist?since=2026-07-01T00:00:00Z", "")
 	if domains.sinceSeen == nil {
@@ -185,7 +188,7 @@ func TestCheckKnownDomainReturnsStoredStatus(t *testing.T) {
 	source := "L1"
 	reason := "IP hosting sama"
 	domains := &fakeDomainRepository{check: db.CheckResult{Status: "blocked", Confidence: &confidence, Source: &source, Reason: &reason}}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	rr := doJSONWith(t, mux, http.MethodPost, "/api/v1/check", `{"domain":"gacor88x.xyz"}`)
 	body := decode(t, rr)
@@ -218,7 +221,7 @@ func TestAnalyzeWithVisionClientAppliesThreshold(t *testing.T) {
 	vision := layer2.NewVisionClient("test-key")
 	vision.Endpoint = geminiSrv.URL
 	store := newMemoryDomainStore()
-	mux := newMuxWith(vision, store, fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, &fakeDomainRepository{})
+	mux := newMuxWith(vision, store, fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, &fakeDomainRepository{}, newRealtimeHub())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/analyze", strings.NewReader(`{"domain":"gacor88x.xyz","evidence_b64":"Zm9v"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -272,7 +275,7 @@ func TestFingerprintMatchReturnsMatchedFields(t *testing.T) {
 	clusters := fakeClusterLister{clusters: []layer1.Cluster{
 		{ID: "cluster-1", HostingIP: ip, TLD: "xyz", RegistrationBurstScore: &burst},
 	}}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), extractor, clusters, fakeClusterStore{}, &fakeDomainRepository{})
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), extractor, clusters, fakeClusterStore{}, &fakeDomainRepository{}, newRealtimeHub())
 
 	rr := doJSONWith(t, mux, http.MethodPost, "/api/v1/fingerprint", `{"domain":"sib.test"}`)
 	body := decode(t, rr)
@@ -302,7 +305,7 @@ func TestDomainsListReturnsItemsAndTotal(t *testing.T) {
 		listItems: []db.DomainListItem{{ID: "id-1", Domain: "gacor88x.xyz", Status: "blocked", Confidence: &confidence}},
 		listTotal: 42,
 	}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	rr := doJSONWith(t, mux, http.MethodGet, "/api/v1/domains", "")
 	body := decode(t, rr)
@@ -317,7 +320,7 @@ func TestDomainsListReturnsItemsAndTotal(t *testing.T) {
 
 func TestDomainsListFiltersForwardedToRepository(t *testing.T) {
 	domains := &fakeDomainRepository{}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	doJSONWith(t, mux, http.MethodGet, "/api/v1/domains?source=L1&status=blocked", "")
 	if domains.sourceArg == nil || *domains.sourceArg != "L1" {
@@ -340,7 +343,7 @@ func TestDomainDetailFoundHasSiblingsKey(t *testing.T) {
 		Domain:   "gacor88x.xyz",
 		Siblings: []string{"sib1.test", "sib2.test"},
 	}}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	rr := doJSONWith(t, mux, http.MethodGet, "/api/v1/domains/some-id", "")
 	if rr.Code != 200 {
@@ -366,7 +369,7 @@ func TestReportFalsePositiveOk(t *testing.T) {
 
 func TestReportFalsePositiveForwardsDomainID(t *testing.T) {
 	domains := &fakeDomainRepository{}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	doJSONWith(t, mux, http.MethodPost, "/api/v1/report-false-positive", `{"domain_id":"abc-123","note":"legit site"}`)
 	if domains.reportedDomainID != "abc-123" {
@@ -376,7 +379,7 @@ func TestReportFalsePositiveForwardsDomainID(t *testing.T) {
 
 func TestReportFalsePositiveStillOkOnRepositoryError(t *testing.T) {
 	domains := &fakeDomainRepository{reportErr: context.DeadlineExceeded}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	rr := doJSONWith(t, mux, http.MethodPost, "/api/v1/report-false-positive", `{"domain_id":"abc-123"}`)
 	if rr.Code != 200 {
@@ -397,7 +400,7 @@ func TestBootstrapLatestZeroStateNotError(t *testing.T) {
 
 func TestBootstrapLatestComputesRatio(t *testing.T) {
 	domains := &fakeDomainRepository{bootstrap: &db.BootstrapRun{L2Confirmations: 5, L1PreemptiveCatches: 2, L1Misses: 1}}
-	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains)
+	mux := newMuxWith(layer2.NewVisionClient(""), newMemoryDomainStore(), fakeExtractor{}, fakeClusterLister{}, fakeClusterStore{}, domains, newRealtimeHub())
 
 	rr := doJSONWith(t, mux, http.MethodGet, "/api/v1/bootstrap/latest", "")
 	body := decode(t, rr)

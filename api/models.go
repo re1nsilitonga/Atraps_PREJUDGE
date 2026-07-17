@@ -5,6 +5,7 @@
 package main
 
 type BlocklistEntry struct {
+	ID            string   `json:"id"`
 	Domain        string   `json:"domain"`
 	Confidence    float64  `json:"confidence"`
 	Reason        string   `json:"reason"`
