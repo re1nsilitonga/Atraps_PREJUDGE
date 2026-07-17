@@ -12,7 +12,7 @@ function ruleIdFor(domain) {
   return ((hash >>> 0) % 0x3fffffff) + 1;
 }
 
-function redirectUrl(entry) {
+export function redirectUrl(entry) {
   const params = new URLSearchParams({
     d: entry.domain,
     c: String(entry.confidence ?? 0),

@@ -1,7 +1,10 @@
 import { API_BASE } from "./lib/config.js";
 import { loadCache } from "./lib/blocklist.js";
+import { redirectUrl } from "./lib/rules.js";
 
 const analyzedThisSession = new Set();
+
+const L2_CONFIDENCE_THRESHOLD = 0.8;
 
 function isAnalyzableURL(url) {
   try {
@@ -37,11 +40,23 @@ export async function maybeCapture(tabId, url) {
     const evidenceB64 = dataUrl.split(",")[1];
     if (!evidenceB64) return;
 
-    await fetch(`${API_BASE}/analyze`, {
+    const res = await fetch(`${API_BASE}/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ domain, evidence_b64: evidenceB64, evidence_type: "screenshot" }),
     });
+    const result = await res.json();
+
+    if (result.is_judol && result.confidence >= L2_CONFIDENCE_THRESHOLD) {
+      const target = chrome.runtime.getURL(redirectUrl({
+        domain,
+        confidence: result.confidence,
+        reason: result.reason,
+        matchedFields: [],
+        id: result.domain_id,
+      }));
+      await chrome.tabs.update(tabId, { url: target });
+    }
   } catch {
   }
 }
