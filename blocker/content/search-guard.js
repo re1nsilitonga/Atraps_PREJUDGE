@@ -1,7 +1,4 @@
-// PJ-508: catch judol domains before the user even clicks through from
-// Google search results — same blocked.html used for direct-nav blocks,
-// just triggered by scanning result links instead of a DNR redirect.
-const CACHE_KEY = "blocklistCache"; // matches lib/blocklist.js
+const CACHE_KEY = "blocklistCache";
 
 function redirectUrl(entry) {
   const params = new URLSearchParams({

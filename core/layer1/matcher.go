@@ -1,8 +1,5 @@
 package layer1
 
-// matchThreshold and matchWeights are PJ-404's starting values — tune with
-// real data, not gospel. If the T+5 gate kills registration_burst, redistribute
-// its 0.25 across hosting_ip/nameserver and say so (PRD §5).
 const matchThreshold = 0.6
 
 var matchWeights = map[string]float64{
@@ -19,8 +16,6 @@ type MatchResult struct {
 	MatchedFields []string
 }
 
-// Match scores an unseen domain's fingerprint against known clusters.
-// No-match returns cleanly (nil) — the normal case on an empty/young DB.
 func Match(fp Fingerprint, clusters []Cluster) *MatchResult {
 	var best *MatchResult
 	for _, c := range clusters {

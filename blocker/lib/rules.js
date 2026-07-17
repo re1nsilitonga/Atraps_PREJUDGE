@@ -1,9 +1,6 @@
-// PJ-503: declarativeNetRequest dynamic rules, one per blocked domain.
-// Rule id counter lives in chrome.storage.local, not memory — the service
-// worker dies and resets any in-memory counter (PJ-503 technical note).
 
 const RULE_ID_COUNTER_KEY = "ruleIdCounter";
-const RULE_MAP_KEY = "ruleMap"; // { [domain]: { ruleId, signature } }
+const RULE_MAP_KEY = "ruleMap";
 
 function signatureOf(entry) {
   return JSON.stringify([entry.confidence, entry.reason, entry.matchedFields]);
@@ -42,9 +39,6 @@ function buildRule(ruleId, entry) {
   };
 }
 
-// syncRules reconciles DNR dynamic rules with the given blocklist entries.
-// Domains no longer blocked (false_pos, purged) get their rule removed;
-// new/changed domains get a rule added or replaced. Re-runnable, idempotent.
 export async function syncRules(entries) {
   const { [RULE_MAP_KEY]: ruleMap = {} } = await chrome.storage.local.get(RULE_MAP_KEY);
 
@@ -61,11 +55,11 @@ export async function syncRules(entries) {
   for (const entry of entries) {
     const signature = signatureOf(entry);
     const existing = ruleMap[entry.domain];
-    if (existing && existing.signature === signature) continue; // unchanged, skip
+    if (existing && existing.signature === signature) continue;
 
     let ruleId = existing?.ruleId;
     if (ruleId) {
-      removeRuleIds.push(ruleId); // replace: remove old, add new below
+      removeRuleIds.push(ruleId);
     } else {
       ruleId = await nextRuleId();
     }

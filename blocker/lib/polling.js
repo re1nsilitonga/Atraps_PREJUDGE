@@ -1,7 +1,3 @@
-// PJ-505: polling adapter — second transport behind the same onDomainBlocked
-// callback the realtime adapter uses, so background.js can't tell them apart.
-// Single-source-access follow-up: hits the Go API's own /blocklist?since=
-// (already supported the cursor), not Supabase REST directly.
 import { API_BASE, POLL_INTERVAL_MS } from "./config.js";
 
 export function createPollingAdapter(onDomainBlocked) {
@@ -19,7 +15,6 @@ export function createPollingAdapter(onDomainBlocked) {
       }
       if (body.updated_at) since = body.updated_at;
     } catch {
-      // silent — next tick retries (PJ-202 pattern: failure invisible to the user)
     }
   }
 

@@ -40,9 +40,6 @@ func TestRealtimeHubDropsUnsubscribedClient(t *testing.T) {
 	}
 }
 
-// TestRealtimeWSEndToEnd drives the real WebSocket handler over httptest,
-// the same handler api/main.go registers at GET /api/v1/realtime — proves a
-// browser client actually receives a broadcast, not just the in-process hub.
 func TestRealtimeWSEndToEnd(t *testing.T) {
 	hub := newRealtimeHub()
 	srv := httptest.NewServer(http.HandlerFunc(hub.serveWS))
@@ -58,8 +55,6 @@ func TestRealtimeWSEndToEnd(t *testing.T) {
 	}
 	defer conn.CloseNow()
 
-	// Give serveWS's subscribe() a moment to register before we broadcast —
-	// otherwise the message may fire before the client is in hub.clients.
 	deadline := time.Now().Add(time.Second)
 	for hub.clientCount() == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

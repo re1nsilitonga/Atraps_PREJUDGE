@@ -1,9 +1,3 @@
-// Package layer1 implements Core Engine Layer 1: preemptive detection via
-// infrastructure fingerprinting and cluster correlation.
-//
-// Imports nothing Chrome-shaped, nothing realtime-shaped, nothing UI-shaped
-// (PRD.md §8). Network calls go through the dnsLookup/rdapClient interfaces
-// so extraction logic is unit-testable without a live network.
 package layer1
 
 import (
@@ -21,7 +15,7 @@ type Fingerprint struct {
 	Domain       string
 	Registrar    *string
 	HostingIP    *string
-	ASNPrefix    *string // IP /24 prefix stands in for ASN (PJ-401: no free stdlib ASN source)
+	ASNPrefix    *string
 	Nameserver   *string
 	TLD          string
 	RegisteredAt *time.Time
@@ -42,10 +36,6 @@ type systemDNS struct{}
 func (systemDNS) LookupIP(domain string) ([]net.IP, error)  { return net.LookupIP(domain) }
 func (systemDNS) LookupNS(domain string) ([]*net.NS, error) { return net.LookupNS(domain) }
 
-// httpRDAP queries the public RDAP bootstrap redirector. RDAP (RFC 9083) is
-// the IETF-standardized JSON-over-HTTPS successor to WHOIS — using it avoids
-// hand-rolling the legacy port-43 text protocol for the same registrar/date
-// fields PJ-401 needs.
 type httpRDAP struct{ client *http.Client }
 
 func (h httpRDAP) Lookup(ctx context.Context, domain string) (map[string]any, error) {
@@ -59,7 +49,7 @@ func (h httpRDAP) Lookup(ctx context.Context, domain string) (map[string]any, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil // redacted/unregistered — PJ-401: "Redacted WHOIS → None, not exceptions"
+		return nil, nil
 	}
 	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -84,8 +74,6 @@ func NewExtractor() *Extractor {
 	}
 }
 
-// Extract never re-queries a domain already in the cache
-// (PJ-401: "Cached — never re-query a fetched domain").
 func (e *Extractor) Extract(ctx context.Context, domain string) (Fingerprint, error) {
 	e.mu.Lock()
 	if fp, ok := e.cache[domain]; ok {

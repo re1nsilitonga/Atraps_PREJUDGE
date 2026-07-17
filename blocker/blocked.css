@@ -1,7 +1,3 @@
-/* PREJUDGE block page — locked dark theme, palette: #000000 #002ef4 #27dddf #ffffff.
-   Trust-first interstitial (Section 0.A #6 override): centered single-message
-   card is deliberate here, not the marketing-hero anti-center default. */
-
 :root {
   color-scheme: dark;
   --bg: #050507;

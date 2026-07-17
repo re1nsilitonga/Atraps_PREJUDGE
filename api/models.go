@@ -1,7 +1,3 @@
-// Pydantic-equivalent request/response shapes — mirror core/contract.go.
-//
-// These do not replace core/contract.go; Core stays framework-free.
-// See README.md API Contract section, PRD.md §10.
 package main
 
 type BlocklistEntry struct {

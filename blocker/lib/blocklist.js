@@ -1,10 +1,7 @@
-// PJ-504: blocklist sync — full fetch on startup, cached in
-// chrome.storage.local so it survives service-worker restart, DNR rules
-// rebuilt from the cache immediately (no network wait before rules exist).
 import { API_BASE } from "./config.js";
 import { syncRules } from "./rules.js";
 
-const CACHE_KEY = "blocklistCache"; // { [domain]: entry }
+const CACHE_KEY = "blocklistCache";
 
 function normalize(row) {
   return {
@@ -16,8 +13,6 @@ function normalize(row) {
   };
 }
 
-// fetchFull is the cold-start / worker-restart path. Empty result is the
-// normal state on a fresh install (PJ-504) — not an error.
 export async function fetchFull() {
   const res = await fetch(`${API_BASE}/blocklist`);
   if (!res.ok) return [];
@@ -35,14 +30,11 @@ async function saveCache(entries) {
   await chrome.storage.local.set({ [CACHE_KEY]: cache });
 }
 
-// applyFull replaces the whole blocklist (startup) and rebuilds DNR rules.
 export async function applyFull(entries) {
   await saveCache(entries);
   await syncRules(entries);
 }
 
-// applyOne merges a single incremental event (realtime/polling) into the
-// cache and DNR rules without refetching everything.
 export async function applyOne(row) {
   const entry = normalize(row);
   const entries = await loadCache();
@@ -52,8 +44,6 @@ export async function applyOne(row) {
   await syncRules(next);
 }
 
-// removeDomain drops a domain's DNR rule immediately (PJ-507 / PRD §14 risk
-// #14: a stuck block after "Laporkan salah" is an ugly demo moment).
 export async function removeDomain(domain) {
   const entries = await loadCache();
   const next = entries.filter((e) => e.domain !== domain);

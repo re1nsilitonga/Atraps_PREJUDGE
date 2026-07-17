@@ -31,8 +31,6 @@ func TestEvidenceFields(t *testing.T) {
 	}
 }
 
-// TestContractImportsStdlibOnly is the seam test (PRD §11): would this file
-// compile if the extension didn't exist?
 func TestContractImportsStdlibOnly(t *testing.T) {
 	src, err := os.ReadFile("contract.go")
 	if err != nil {

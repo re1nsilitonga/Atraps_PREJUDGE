@@ -23,9 +23,6 @@ type Cluster struct {
 	RegistrationBurstScore  *float64
 }
 
-// BuildClusters groups by shared hosting IP — "same landlord, same street"
-// (PRD §4). It is a GROUP BY, not clustering ML: do not import a
-// clustering/ML library here (PJ-402).
 func BuildClusters(records []DomainRecord) []Cluster {
 	byIP := map[string][]DomainRecord{}
 	for _, r := range records {
@@ -38,7 +35,7 @@ func BuildClusters(records []DomainRecord) []Cluster {
 	clusters := make([]Cluster, 0, len(byIP))
 	for ip, group := range byIP {
 		if len(group) < 2 {
-			continue // a "cluster" of one domain has no sibling to flag
+			continue
 		}
 		clusters = append(clusters, buildCluster(ip, group))
 	}
@@ -72,10 +69,6 @@ func buildCluster(ip string, group []DomainRecord) Cluster {
 	return c
 }
 
-// applyBurstScore computes the registration-burst signal (PJ-403): a dense
-// registration window across many domains is the actual PREDATOR/Netcraft
-// signal — the gap between bulk registration and campaign activation.
-// Degrades cleanly to a nil score when registration dates are unavailable.
 func applyBurstScore(c *Cluster) {
 	if c.FirstRegistrationDate == nil || c.LastRegistrationDate == nil {
 		return

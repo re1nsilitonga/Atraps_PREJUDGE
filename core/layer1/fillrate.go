@@ -1,8 +1,5 @@
 package layer1
 
-// FillRate reports, per field, the fraction of fingerprints where that field
-// is populated. PJ-401's T+5 gate: if registered_at's rate is poor, burst
-// detection (PJ-403) has no signal and "preemptive" becomes unsupportable.
 func FillRate(fingerprints []Fingerprint) map[string]float64 {
 	rates := map[string]float64{
 		"registrar":     0,
