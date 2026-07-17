@@ -16,6 +16,8 @@ import (
 	"prime/core/layer1"
 	"prime/core/layer2"
 	"prime/db"
+
+	"github.com/joho/godotenv"
 )
 
 type analyzeStore interface {
@@ -468,6 +470,7 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func main() {
+	_ = godotenv.Load()
 	log.Println("PRIME API listening on :8000")
 	log.Fatal(http.ListenAndServe(":8000", newMux()))
 }
