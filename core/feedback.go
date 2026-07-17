@@ -1,38 +1,24 @@
-// The feedback loop (PJ-301, Epic 3): a Layer 2 confirmation triggers
-// fingerprint extraction and cluster seeding, so Layer 1 has something to
-// match against. Without this, Layer 1 has no input at all — not weaker,
-// none — because under cold start there is no other data source
-// (PRD.md §4, TASKS.md Epic 3).
 package core
 
 import (
 	"context"
+	"time"
 
-	"prejudge/core/layer1"
+	"prime/core/layer1"
 )
 
-// ConfirmedDomains lists every domain Layer 2 has confirmed so far. The
-// feedback loop rebuilds clusters from this whole set on every
-// confirmation — cheap at hackathon scale, and it keeps ClusterStore.Upsert
-// idempotent rather than needing incremental merge logic.
 type ConfirmedDomains interface {
 	ListConfirmed(ctx context.Context) ([]string, error)
 }
 
-// FingerprintExtractor pulls infrastructure signals for one domain.
-// Satisfied by layer1.Extractor.
 type FingerprintExtractor interface {
 	Extract(ctx context.Context, domain string) (layer1.Fingerprint, error)
 }
 
-// ClusterStore persists clusters. Satisfied by db.ClusterRepository.
 type ClusterStore interface {
 	Upsert(ctx context.Context, c layer1.Cluster) (string, error)
 }
 
-// Feedback seeds/updates Layer 1 clusters from every currently-confirmed
-// domain. Call it after a Layer 2 verdict flips a domain to blocked; run it
-// in a goroutine — it must never delay the verdict response (PJ-301).
 func Feedback(ctx context.Context, domains ConfirmedDomains, extractor FingerprintExtractor, clusters ClusterStore) error {
 	confirmed, err := domains.ListConfirmed(ctx)
 	if err != nil {
@@ -43,13 +29,65 @@ func Feedback(ctx context.Context, domains ConfirmedDomains, extractor Fingerpri
 	for _, domain := range confirmed {
 		fp, err := extractor.Extract(ctx, domain)
 		if err != nil {
-			continue // PJ-401: a failed/redacted lookup degrades to no fingerprint, not a crash
+			continue
 		}
 		records = append(records, layer1.DomainRecord{Domain: domain, Fingerprint: fp})
 	}
 
 	for _, cluster := range layer1.BuildClusters(records) {
 		if _, err := clusters.Upsert(ctx, cluster); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type CandidateDomains interface {
+	ListCandidates(ctx context.Context) ([]string, error)
+}
+
+type ClusterLister interface {
+	ListClusters(ctx context.Context) ([]layer1.Cluster, error)
+}
+
+type BlockedDomainWriter interface {
+	UpsertBlocked(ctx context.Context, v Verdict) error
+}
+
+func MatchSiblings(ctx context.Context, candidates CandidateDomains, extractor FingerprintExtractor, clusters ClusterLister, store BlockedDomainWriter) error {
+	names, err := candidates.ListCandidates(ctx)
+	if err != nil {
+		return err
+	}
+
+	clusterList, err := clusters.ListClusters(ctx)
+	if err != nil {
+		return err
+	}
+	if len(clusterList) == 0 {
+		return nil
+	}
+
+	for _, domain := range names {
+		fp, err := extractor.Extract(ctx, domain)
+		if err != nil {
+			continue
+		}
+		result := layer1.Match(fp, clusterList)
+		if result == nil {
+			continue
+		}
+
+		v := Verdict{
+			Domain:        domain,
+			IsJudol:       true,
+			Confidence:    result.Score,
+			Reason:        "Cocok dengan kluster infrastruktur situs judi online yang telah dikonfirmasi.",
+			MatchedFields: result.MatchedFields,
+			Source:        SourceL1,
+			DetectedAt:    time.Now().UTC(),
+		}
+		if err := store.UpsertBlocked(ctx, v); err != nil {
 			return err
 		}
 	}

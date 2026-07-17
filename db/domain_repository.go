@@ -1,7 +1,3 @@
-// DomainRepository backs the Blocker read surface (PJ-506), the false-positive
-// report (PJ-507), the dashboard list/detail views (PJ-605), and the
-// cold-start counter (PJ-704). It lives in db/, not core/ — same reasoning as
-// ClusterRepository (PRD §9: Core emits shapes, adapters own persistence).
 package db
 
 import (
@@ -11,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"prejudge/core"
+	"prime/core"
 )
 
 type BlocklistDomain struct {
@@ -69,8 +65,6 @@ func NewDomainRepository(pool *pgxpool.Pool) *DomainRepository {
 	return &DomainRepository{pool: pool}
 }
 
-// Blocklist reads status='blocked' domains, optionally filtered to rows
-// blocked after `since` (PJ-506: "since actually filters").
 func (r *DomainRepository) Blocklist(ctx context.Context, since *time.Time) ([]BlocklistDomain, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, domain, COALESCE(confidence, 0), COALESCE(reason, ''), matched_fields
@@ -96,10 +90,6 @@ func (r *DomainRepository) Blocklist(ctx context.Context, since *time.Time) ([]B
 	return out, rows.Err()
 }
 
-// Check looks up one domain's current status. A domain the system has never
-// seen is not an error (PJ-506: "clean not-found state, not a 404 the
-// Blocker must catch") — it reports status "candidate", same as any other
-// domain not yet confirmed.
 func (r *DomainRepository) Check(ctx context.Context, domain string) (CheckResult, error) {
 	var res CheckResult
 	err := r.pool.QueryRow(ctx, `
@@ -111,10 +101,24 @@ func (r *DomainRepository) Check(ctx context.Context, domain string) (CheckResul
 	return res, nil
 }
 
-// ReportFalsePositive backs the block page's "Laporkan salah" button
-// (PJ-507). No auth in the MVP; an invalid or unknown domain_id is logged by
-// the caller but still answers ok — a stuck-looking error here is worse than
-// a silent no-op (PRD §14 risk #14).
+func (r *DomainRepository) ListCandidates(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT domain FROM domains WHERE status = 'candidate'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var domain string
+		if err := rows.Scan(&domain); err != nil {
+			return nil, err
+		}
+		out = append(out, domain)
+	}
+	return out, rows.Err()
+}
+
 func (r *DomainRepository) ReportFalsePositive(ctx context.Context, domainID, note string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE domains SET status = 'false_pos' WHERE id = $1::uuid
@@ -122,8 +126,6 @@ func (r *DomainRepository) ReportFalsePositive(ctx context.Context, domainID, no
 	return err
 }
 
-// ListDomains backs the dashboard list (PJ-605). nil source/status means
-// "no filter" on that column.
 func (r *DomainRepository) ListDomains(ctx context.Context, limit, offset int, source, status *string) ([]DomainListItem, int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, domain, status::text, source::text, confidence, first_seen
@@ -163,15 +165,13 @@ func (r *DomainRepository) ListDomains(ctx context.Context, limit, offset int, s
 	return items, total, nil
 }
 
-// DomainDetail backs the dashboard drill-down (PJ-605). A nil result (no
-// error) means the id doesn't exist — the caller turns that into a 404.
 func (r *DomainRepository) DomainDetail(ctx context.Context, id string) (*DomainDetail, error) {
 	var domain string
 	var clusterID *string
 	err := r.pool.QueryRow(ctx, `SELECT domain, cluster_id::text FROM domains WHERE id = $1::uuid`, id).
 		Scan(&domain, &clusterID)
 	if err != nil {
-		return nil, nil // not found, not a system error
+		return nil, nil
 	}
 
 	detail := &DomainDetail{Domain: domain}
@@ -208,9 +208,9 @@ func (r *DomainRepository) DomainDetail(ctx context.Context, id string) (*Domain
 		`, *clusterID).Scan(&registrar, &nameserver, &tld, &burstScore)
 		if err == nil {
 			detail.Cluster = map[string]any{
-				"registrar":               registrar,
-				"nameserver":              nameserver,
-				"tld":                     tld,
+				"registrar":                registrar,
+				"nameserver":               nameserver,
+				"tld":                      tld,
 				"registration_burst_score": burstScore,
 			}
 		}
@@ -247,8 +247,6 @@ func (r *DomainRepository) DomainDetail(ctx context.Context, id string) (*Domain
 	return detail, nil
 }
 
-// BootstrapLatest backs GET /bootstrap/latest (PJ-704). No runs yet is not
-// an error — the demo's opening frame is this exact all-zeros state.
 func (r *DomainRepository) BootstrapLatest(ctx context.Context) (*BootstrapRun, error) {
 	var run BootstrapRun
 	err := r.pool.QueryRow(ctx, `
@@ -261,9 +259,6 @@ func (r *DomainRepository) BootstrapLatest(ctx context.Context) (*BootstrapRun, 
 	return &run, nil
 }
 
-// RecordBootstrapRun writes one cold-start proof run (PJ-703). Each call is
-// a new row — re-running the script from a clean state is safe by
-// construction, not something the repository has to special-case.
 func (r *DomainRepository) RecordBootstrapRun(ctx context.Context, l2Confirmations, l1PreemptiveCatches, l1Misses int, notes string) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO bootstrap_runs (l2_confirmations, l1_preemptive_catches, l1_misses, notes)
@@ -272,11 +267,6 @@ func (r *DomainRepository) RecordBootstrapRun(ctx context.Context, l2Confirmatio
 	return err
 }
 
-// EnsureDomain returns the id of domain, inserting a status='candidate' row
-// if none exists yet. Called synchronously from the /analyze handler (PJ-204)
-// because the response contract requires domain_id in the same response —
-// unlike UpsertBlocked/LogDetection/ListConfirmed below, this cannot run in
-// the background goroutine.
 func (r *DomainRepository) EnsureDomain(ctx context.Context, domain string) (string, error) {
 	var id string
 	err := r.pool.QueryRow(ctx, `
@@ -287,9 +277,6 @@ func (r *DomainRepository) EnsureDomain(ctx context.Context, domain string) (str
 	return id, err
 }
 
-// UpsertBlocked marks domain as status='blocked' with the verdict's
-// source/confidence/reason/matched_fields. Idempotent on domain (PJ-203: "no
-// dupes on repeat visits") via the same ON CONFLICT upsert as EnsureDomain.
 func (r *DomainRepository) UpsertBlocked(ctx context.Context, verdict core.Verdict) error {
 	matchedFields, err := json.Marshal(verdict.MatchedFields)
 	if err != nil {
@@ -305,11 +292,6 @@ func (r *DomainRepository) UpsertBlocked(ctx context.Context, verdict core.Verdi
 	return err
 }
 
-// LogDetection appends a detections row regardless of threshold outcome
-// (core/layer2/decide.go's DomainStore contract). Self-ensures the parent
-// domains row exists first — detections.domain_id is FK NOT NULL — so this
-// is safe to call even if EnsureDomain wasn't (or couldn't have been)
-// called first for this particular domain.
 func (r *DomainRepository) LogDetection(ctx context.Context, domain string, layer int, confidence float64, reason string, raw json.RawMessage) error {
 	domainID, err := r.EnsureDomain(ctx, domain)
 	if err != nil {
@@ -325,9 +307,6 @@ func (r *DomainRepository) LogDetection(ctx context.Context, domain string, laye
 	return err
 }
 
-// ListConfirmed returns domains Layer 2 has confirmed (source='L2',
-// status='blocked') — the feedback loop's (core/feedback.go, PJ-301) input
-// set, and the leakage-assertion boundary for PJ-703's cold-start proof.
 func (r *DomainRepository) ListConfirmed(ctx context.Context) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT domain FROM domains WHERE source = 'L2' AND status = 'blocked'

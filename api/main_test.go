@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"prejudge/core/layer1"
-	"prejudge/core/layer2"
-	"prejudge/db"
+	"prime/core/layer1"
+	"prime/core/layer2"
+	"prime/db"
 )
 
 type fakeExtractor struct {
@@ -69,6 +69,10 @@ func (f *fakeDomainRepository) Blocklist(ctx context.Context, since *time.Time) 
 
 func (f *fakeDomainRepository) Check(ctx context.Context, domain string) (db.CheckResult, error) {
 	return f.check, f.checkErr
+}
+
+func (f *fakeDomainRepository) ListCandidates(ctx context.Context) ([]string, error) {
+	return nil, nil
 }
 
 func (f *fakeDomainRepository) ReportFalsePositive(ctx context.Context, domainID, note string) error {
@@ -242,8 +246,6 @@ func TestAnalyzeWithVisionClientAppliesThreshold(t *testing.T) {
 		t.Fatalf("expected confidence 0.95, got %v", body["confidence"])
 	}
 
-	// Feedback loop runs in a goroutine (PJ-204) — poll briefly for the
-	// domain to land in the store instead of sleeping a fixed duration.
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		store.mu.Lock()

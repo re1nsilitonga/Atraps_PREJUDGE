@@ -1,7 +1,3 @@
-// Thin HTTP transport over core/. No detection logic lives here.
-//
-// PJ-106: all 9 routes return contract-shaped stub responses until the real
-// Core functions (Epic 2 / Epic 4) are wired in behind them.
 package main
 
 import (
@@ -16,27 +12,18 @@ import (
 	"sync"
 	"time"
 
-	"prejudge/core"
-	"prejudge/core/layer1"
-	"prejudge/core/layer2"
-	"prejudge/db"
+	"prime/core"
+	"prime/core/layer1"
+	"prime/core/layer2"
+	"prime/db"
 )
 
-// analyzeStore is the persistence surface /analyze needs: the
-// layer2.DomainStore + core.ConfirmedDomains contracts, plus EnsureDomain
-// for the domain_id the response contract requires synchronously (it can't
-// wait for the async Decide/Feedback goroutine). Satisfied by both
-// *memoryDomainStore (no DATABASE_URL) and *db.DomainRepository (real).
 type analyzeStore interface {
 	layer2.DomainStore
 	core.ConfirmedDomains
 	EnsureDomain(ctx context.Context, domain string) (string, error)
 }
 
-// memoryDomainStore is a placeholder analyzeStore for local dev without
-// DATABASE_URL. It exists so /analyze can be exercised end-to-end without a
-// DB dependency; swap the wiring in newMux, not the handler, once
-// DATABASE_URL is configured.
 type memoryDomainStore struct {
 	mu       sync.Mutex
 	blocked  map[string]core.Verdict
@@ -65,8 +52,6 @@ func (s *memoryDomainStore) LogDetection(ctx context.Context, domain string, lay
 	return nil
 }
 
-// idFor assigns a stable random id to a domain on first sight. Caller must
-// hold s.mu.
 func (s *memoryDomainStore) idFor(domain string) string {
 	if id, ok := s.domainID[domain]; ok {
 		return id
@@ -84,8 +69,6 @@ func (s *memoryDomainStore) EnsureDomain(ctx context.Context, domain string) (st
 	return s.idFor(domain), nil
 }
 
-// ListConfirmed satisfies core.ConfirmedDomains — the feedback loop (PJ-301)
-// rebuilds clusters from every domain this store has ever blocked.
 func (s *memoryDomainStore) ListConfirmed(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,39 +93,28 @@ type clusterLister interface {
 	ListClusters(ctx context.Context) ([]layer1.Cluster, error)
 }
 
-// domainRepository backs the Blocker read surface (PJ-506), false-positive
-// reports (PJ-507), the dashboard list/detail views (PJ-605), and the
-// cold-start counter (PJ-704).
 type domainRepository interface {
 	Blocklist(ctx context.Context, since *time.Time) ([]db.BlocklistDomain, error)
 	Check(ctx context.Context, domain string) (db.CheckResult, error)
+	ListCandidates(ctx context.Context) ([]string, error)
 	ReportFalsePositive(ctx context.Context, domainID, note string) error
 	ListDomains(ctx context.Context, limit, offset int, source, status *string) ([]db.DomainListItem, int, error)
 	DomainDetail(ctx context.Context, id string) (*db.DomainDetail, error)
 	BootstrapLatest(ctx context.Context) (*db.BootstrapRun, error)
 }
 
-// noopClusterLister degrades /fingerprint to a clean no-match when
-// DATABASE_URL isn't configured (e.g. local dev), instead of crashing the
-// whole server — mirrors the vision-client "stub if no key" pattern below.
 type noopClusterLister struct{}
 
 func (noopClusterLister) ListClusters(ctx context.Context) ([]layer1.Cluster, error) {
 	return nil, nil
 }
 
-// noopClusterStore makes the feedback loop (PJ-301) a no-op when
-// DATABASE_URL isn't configured, instead of crashing the background
-// goroutine — same reasoning as noopClusterLister above.
 type noopClusterStore struct{}
 
 func (noopClusterStore) Upsert(ctx context.Context, c layer1.Cluster) (string, error) {
 	return "", nil
 }
 
-// noopDomainRepository degrades every domains/blocklist/bootstrap endpoint
-// to its documented empty state when DATABASE_URL isn't configured, instead
-// of crashing the whole server.
 type noopDomainRepository struct{}
 
 func (noopDomainRepository) Blocklist(ctx context.Context, since *time.Time) ([]db.BlocklistDomain, error) {
@@ -151,6 +123,10 @@ func (noopDomainRepository) Blocklist(ctx context.Context, since *time.Time) ([]
 
 func (noopDomainRepository) Check(ctx context.Context, domain string) (db.CheckResult, error) {
 	return db.CheckResult{Status: "candidate"}, nil
+}
+
+func (noopDomainRepository) ListCandidates(ctx context.Context) ([]string, error) {
+	return nil, nil
 }
 
 func (noopDomainRepository) ReportFalsePositive(ctx context.Context, domainID, note string) error {
@@ -200,15 +176,9 @@ func newMux() http.Handler {
 	return newMuxWith(vision, store, layer1.NewExtractor(), clusters, clusterStore, domains, hub)
 }
 
-// newMuxWith builds the router with explicit dependencies, so tests can
-// inject a fake Gemini endpoint / store / fingerprint extractor / cluster
-// source / cluster store / domain repository / realtime hub without
-// touching env vars or a live network/DB.
 func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor fingerprintExtractor, clusters clusterLister, clusterStore core.ClusterStore, domains domainRepository, hub *realtimeHub) http.Handler {
 	mux := http.NewServeMux()
 
-	// PJ-506: real blocklist read. `since` filters to rows blocked after
-	// that timestamp; an unparseable or absent value means "everything".
 	mux.HandleFunc("GET /api/v1/blocklist", func(w http.ResponseWriter, r *http.Request) {
 		var since *time.Time
 		if raw := r.URL.Query().Get("since"); raw != "" {
@@ -239,12 +209,8 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		})
 	})
 
-	// Single-source-access follow-up: the Blocker's only realtime
-	// transport. See api/realtime.go.
 	mux.HandleFunc("GET /api/v1/realtime", hub.serveWS)
 
-	// PJ-506: an unknown domain is not an error — it reports "candidate",
-	// the same shape as any domain not yet confirmed.
 	mux.HandleFunc("POST /api/v1/check", func(w http.ResponseWriter, r *http.Request) {
 		var body CheckRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -272,8 +238,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 			return
 		}
 
-		// No key configured (e.g. local dev without .env): stay on the
-		// PJ-106 stub shape rather than fail every request.
 		if vision.APIKey == "" {
 			writeJSON(w, http.StatusOK, AnalyzeResponse{
 				IsJudol:    false,
@@ -284,9 +248,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 			return
 		}
 
-		// EnsureDomain runs synchronously — the response contract requires
-		// domain_id in this same response, so it can't wait for the async
-		// Decide/Feedback goroutine below.
 		domainID, idErr := store.EnsureDomain(r.Context(), body.Domain)
 		if idErr != nil {
 			log.Printf("ensure domain failed for %s: %v", body.Domain, idErr)
@@ -298,7 +259,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 			EvidenceType: core.EvidenceScreenshot,
 		})
 		if err != nil {
-			// PRD §14 risk #4: Gemini down must not take the endpoint down.
 			log.Printf("layer2 analyze failed for %s: %v", body.Domain, err)
 			writeJSON(w, http.StatusOK, AnalyzeResponse{
 				IsJudol:    false,
@@ -309,8 +269,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 			return
 		}
 
-		// PJ-204/PJ-301: threshold decision, then cluster seeding, both
-		// fire in the background so neither delays the response.
 		go func() {
 			ctx := context.Background()
 			if err := layer2.Decide(ctx, store, result); err != nil {
@@ -322,6 +280,10 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 			}
 			if err := core.Feedback(ctx, store, extractor, clusterStore); err != nil {
 				log.Printf("feedback loop failed for %s: %v", body.Domain, err)
+				return
+			}
+			if err := core.MatchSiblings(ctx, domains, extractor, clusters, store); err != nil {
+				log.Printf("sibling matching failed for %s: %v", body.Domain, err)
 			}
 		}()
 
@@ -333,7 +295,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		})
 	})
 
-	// PJ-405: real extraction + matching behind the stub shape.
 	mux.HandleFunc("POST /api/v1/fingerprint", func(w http.ResponseWriter, r *http.Request) {
 		var body FingerprintRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -374,7 +335,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		})
 	})
 
-	// PJ-605: dashboard list, with optional source/status filters.
 	mux.HandleFunc("GET /api/v1/domains", func(w http.ResponseWriter, r *http.Request) {
 		limit := 20
 		if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -418,8 +378,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		writeJSON(w, http.StatusOK, DomainListResponse{Items: items, Total: total})
 	})
 
-	// PJ-605: cluster detail + siblings. Unknown id is a 404, unlike /check's
-	// "candidate" fallback — the dashboard follows a link it expects to exist.
 	mux.HandleFunc("GET /api/v1/domains/{id}", func(w http.ResponseWriter, r *http.Request) {
 		detail, err := domains.DomainDetail(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -450,9 +408,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		})
 	})
 
-	// PJ-507: backs the block page's "Laporkan salah" button. No auth in the
-	// MVP; always answers ok — a stuck-looking error is worse than a silent
-	// no-op on a bad id (PRD §14 risk #14).
 	mux.HandleFunc("POST /api/v1/report-false-positive", func(w http.ResponseWriter, r *http.Request) {
 		var body ReportFalsePositiveRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -469,8 +424,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		writeJSON(w, http.StatusOK, OkResponse{Ok: true})
 	})
 
-	// PJ-704: the demo's opening frame. No runs yet must be a valid
-	// all-zeros response, not an error.
 	mux.HandleFunc("GET /api/v1/bootstrap/latest", func(w http.ResponseWriter, r *http.Request) {
 		run, err := domains.BootstrapLatest(r.Context())
 		if err != nil {
@@ -492,12 +445,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 		})
 	})
 
-	// PJ-701 CUT (team decision): trustpositif.komdigi.go.id's search form
-	// requires solving a Google reCAPTCHA token before it accepts a query —
-	// there is no way to automate this without a CAPTCHA bypass, which the
-	// project's own rules already forbid for aduankonten.id (PRD §6 "NOT
-	// building") and we're applying the same line here. This endpoint stays
-	// a permanent stub, not a TODO — do not attempt a scraper against it.
 	mux.HandleFunc("POST /api/v1/trustpositif/verify", func(w http.ResponseWriter, r *http.Request) {
 		var body TrustPositifVerifyRequest
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -507,9 +454,6 @@ func newMuxWith(vision *layer2.VisionClient, store analyzeStore, extractor finge
 	return withCORS(mux)
 }
 
-// withCORS mirrors FastAPI's CORSMiddleware(allow_origins=["*"]): wildcard
-// origin/methods/headers, and it answers preflight OPTIONS requests itself
-// since http.ServeMux route patterns are method-specific and would 404 them.
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -524,6 +468,6 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func main() {
-	log.Println("PREJUDGE API listening on :8000")
+	log.Println("PRIME API listening on :8000")
 	log.Fatal(http.ListenAndServe(":8000", newMux()))
 }
