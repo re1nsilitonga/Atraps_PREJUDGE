@@ -31,8 +31,7 @@ async function scan() {
     }
     const entry = matchEntry(hostname, cache);
     if (entry) {
-      location.replace(chrome.runtime.getURL(redirectUrl(entry)));
-      return;
+      a.href = chrome.runtime.getURL(redirectUrl(entry));
     }
   }
 }
