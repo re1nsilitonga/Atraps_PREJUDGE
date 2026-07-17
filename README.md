@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://openmoji.org/data/color/svg/1F6D1.svg" width="72" alt="stop sign" />
   <h1>PRIME</h1>
-  <p>Block the domain before it does damage — not after it goes viral.</p>
+  <p>One Block, Thousand Futures Secured!</p>
 
   ![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square)
   ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-336791?style=flat-square)

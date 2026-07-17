@@ -7,7 +7,7 @@
 ## 1. Project Brief
 
 **Product name:** PRIME
-**Tagline:** _Block the domain before it does damage — not after it goes viral._
+**Tagline:** _One Block, Thousand Futures Secured!_
 
 PRIME starts with an empty database and builds its own blocklist: one vision-confirmed judol site yields an infrastructure fingerprint, and that fingerprint preemptively blocks its siblings — domains nobody has ever visited. Every confirmation propagates to all devices in real time, so one user's exposure protects everyone, and the system gets more preemptive the more it's used.
 
