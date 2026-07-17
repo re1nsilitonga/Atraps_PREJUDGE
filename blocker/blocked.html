@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Situs Diblokir, PREJUDGE</title>
+  <link rel="stylesheet" href="blocked.css" />
+</head>
+<body>
+  <main class="wrap">
+    <section class="card" role="alert">
+      <svg class="shield" width="56" height="56" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 2 4 5v6c0 5 3.4 8.6 8 9 4.6-.4 8-4 8-9V5l-8-3Z" stroke="#27dddf" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M9 12.5 11 14.5 15.5 10" stroke="#27dddf" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+
+      <p class="eyebrow">Situs ini diblokir oleh PREJUDGE</p>
+      <h1 id="domainName">memuat.example</h1>
+      <p class="lede">Situs ini terindikasi sebagai judi online berdasarkan sistem deteksi otomatis PREJUDGE.</p>
+
+      <div class="confidence" aria-label="Tingkat keyakinan deteksi">
+        <div class="confidence-track">
+          <div class="confidence-fill" id="confidenceFill"></div>
+        </div>
+        <span class="confidence-value" id="confidenceValue">-</span>
+      </div>
+
+      <div class="reasons">
+        <h2>Kenapa?</h2>
+        <ul id="reasonList"></ul>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" id="reportBtn">Laporkan salah</button>
+        <button class="btn-ghost" id="backBtn">Kembali</button>
+      </div>
+
+      <p class="status" id="statusMsg" role="status" aria-live="polite"></p>
+    </section>
+
+    <p class="footer">PREJUDGE mendeteksi situs judi online secara preemptif dari pola infrastruktur, bukan konten.</p>
+  </main>
+  <script src="blocked.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>PREJUDGE</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      width: 260px;
+      background: #000000;
+      color: #ffffff;
+      font: 13px/1.4 -apple-system, "Segoe UI", sans-serif;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin: 0 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h1 .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #27dddf;
+      flex: none;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .row:last-of-type { border-bottom: none; }
+    .label { color: rgba(255, 255, 255, 0.65); }
+    .value { font-variant-numeric: tabular-nums; }
+    button {
+      margin-top: 14px;
+      width: 100%;
+      background: #002ef4;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:active { transform: scale(0.98); }
+  </style>
+</head>
+<body>
+  <h1><span class="dot" id="statusDot"></span>PREJUDGE Blocker</h1>
+  <div class="row"><span class="label">Domain diblokir</span><span class="value" id="blockedCount">-</span></div>
+  <div class="row"><span class="label">Transport</span><span class="value" id="adapterMode">-</span></div>
+  <button id="toggleAdapter">Ganti ke polling</button>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

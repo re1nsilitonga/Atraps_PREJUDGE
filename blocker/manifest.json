@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "PREJUDGE — Judol Blocker",
+  "version": "0.1.0",
+  "description": "Blokir situs judi online otomatis berdasarkan deteksi PREJUDGE Layer 1 & Layer 2.",
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestWithHostAccess", "tabs", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["blocked.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

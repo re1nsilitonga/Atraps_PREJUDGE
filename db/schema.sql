@@ -82,3 +82,12 @@ ALTER TABLE domains DISABLE ROW LEVEL SECURITY;
 ALTER TABLE detections DISABLE ROW LEVEL SECURITY;
 ALTER TABLE whois_records DISABLE ROW LEVEL SECURITY;
 ALTER TABLE bootstrap_runs DISABLE ROW LEVEL SECURITY;
+
+-- Disabling RLS does not grant table privileges — anon/service_role still
+-- need explicit GRANTs or every PostgREST/Realtime read 42501s (found while
+-- testing the Blocker extension against a schema applied via raw psql,
+-- which skips the grants the Supabase dashboard SQL editor adds for you).
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT SELECT ON public.domains, public.fingerprint_clusters, public.detections, public.whois_records, public.bootstrap_runs TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.domains, public.fingerprint_clusters, public.detections, public.whois_records, public.bootstrap_runs TO service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
