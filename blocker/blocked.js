@@ -1,7 +1,5 @@
 import { API_BASE } from "./lib/config.js";
 
-// matched_fields are machine keys from core/layer1/matcher.go — translated
-// here into the "Kenapa?" bullets Rina from Bekasi actually reads.
 const FIELD_LABELS = {
   hosting_ip: "Menggunakan alamat IP hosting yang sama dengan situs judi online lain yang telah dikonfirmasi.",
   nameserver: "Menggunakan name server yang sama dengan situs judi online lain.",
@@ -23,7 +21,7 @@ try {
 }
 
 document.getElementById("domainName").textContent = domain || "situs ini";
-document.title = `${domain || "Situs"} diblokir, PREJUDGE`;
+document.title = `${domain || "Situs"} diblokir, PRIME`;
 
 const pct = Math.round(confidence * 100);
 document.getElementById("confidenceValue").textContent = `${pct}%`;
@@ -58,9 +56,6 @@ reportBtn.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ domain_id: domainId, note: "Dilaporkan dari block page" }),
     });
-    // Unblock immediately client-side too — a stuck block after "Laporkan
-    // salah" is an ugly demo moment (PRD §14 risk #14); don't wait for the
-    // next blocklist sync cycle.
     await chrome.runtime.sendMessage({ type: "UNBLOCK_DOMAIN", domain });
     statusMsg.textContent = "Laporan terkirim. Situs tidak lagi diblokir.";
     reportBtn.textContent = "Terlapor";

@@ -1,4 +1,4 @@
-# Atraps_PREJUDGE
+# GarudaHacks7.0-Atraps-PRIME
 
 ## Roles & Responsibilities (4 members)
 

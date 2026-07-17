@@ -1,7 +1,3 @@
-// Command fillrate_report runs Layer 1 fingerprint extraction over a list of
-// domains and prints the per-field fill rate — the PJ-401 T+5 gate.
-//
-// Usage: go run ./scripts/fillrate_report domains.txt
 package main
 
 import (
@@ -10,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"prejudge/core/layer1"
+	"prime/core/layer1"
 )
 
 func main() {

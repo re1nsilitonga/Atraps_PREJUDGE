@@ -1,9 +1,3 @@
-// Package layer2 implements Layer 2 (reactive) detection: page evidence in,
-// a core.Verdict out via Gemini vision. This is Core's only AI call
-// (PRD.md §4) — deliberately not the project's innovation claim, so no
-// fine-tuning, no self-trained model. Imports nothing beyond the Go
-// standard library (core/contract.go's seam rule applies to this package
-// too: no Chrome APIs, no Supabase client).
 package layer2
 
 import (
@@ -18,30 +12,23 @@ import (
 	"strings"
 	"time"
 
-	"prejudge/core"
+	"prime/core"
 )
 
 const (
 	defaultModel   = "gemini-3.5-flash"
 	geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s"
 
-	// PRD.md §4: "Apakah ini situs judi online? Ya/tidak, alasan singkat."
-	// reason must render verbatim on the block page for Rina (PRD.md §3),
-	// so it's requested in plain-language Indonesian, not developer jargon.
 	visionPrompt = `Apakah ini situs judi online (judol)? Jawab HANYA dengan JSON, tanpa markdown, dengan format persis:
 {"is_judol": true/false, "confidence": 0.0-1.0, "reason": "alasan singkat dalam Bahasa Indonesia"}`
 )
 
-// VisionClient calls Gemini's vision API to classify page evidence.
 type VisionClient struct {
 	APIKey     string
 	Model      string
 	HTTPClient *http.Client
-	Endpoint   string // overrides the built endpoint; used by tests
+	Endpoint   string
 
-	// CacheDir, if set, enables the PJ-205 on-disk fallback cache: every
-	// successful Analyze is written here, and AnalyzeCached serves the
-	// cached verdict if the live call fails. Empty means no caching.
 	CacheDir string
 }
 
@@ -53,8 +40,6 @@ func NewVisionClient(apiKey string) *VisionClient {
 	}
 }
 
-// AnalyzeResult pairs the contract Verdict with the raw Gemini response body,
-// which callers persist to detections.raw_response (PJ-201).
 type AnalyzeResult struct {
 	Verdict core.Verdict
 	Raw     string
@@ -94,10 +79,6 @@ type visionVerdict struct {
 	Reason     string  `json:"reason"`
 }
 
-// Analyze sends page evidence to Gemini and returns a Verdict. A malformed
-// or unparseable model response degrades to is_judol=false rather than
-// erroring or crashing (PJ-201 acceptance) — the caller should still
-// persist Raw to detections.raw_response for debugging.
 func (c *VisionClient) Analyze(ctx context.Context, ev core.Evidence) (AnalyzeResult, error) {
 	mime := "image/jpeg"
 	if ev.EvidenceType != "" && ev.EvidenceType != core.EvidenceScreenshot {
@@ -187,11 +168,6 @@ func (c *VisionClient) cacheFilePath(domain string) string {
 	return filepath.Join(c.CacheDir, "vision_"+safe+".json")
 }
 
-// AnalyzeCached wraps Analyze with an on-disk fallback cache (PJ-205). The
-// live call always happens first — this is cache-on-failure, not
-// cache-always, so a live demo still hits Gemini when it's up (judges may
-// ask). A prior successful run's cached verdict only covers an outage
-// during the demo itself (PRD §14 risk #4: "Gemini down = no bootstrap").
 func (c *VisionClient) AnalyzeCached(ctx context.Context, ev core.Evidence) (AnalyzeResult, error) {
 	result, err := c.Analyze(ctx, ev)
 	path := c.cacheFilePath(ev.Domain)

@@ -1,13 +1,3 @@
-// Command bootstrap_run produces the cold-start proof (PJ-703): N Layer 2
-// confirmations → M Layer 1 preemptive catches on domains nobody has
-// visited, with individual misses. Writes the result to bootstrap_runs.
-//
-// Usage: go run ./scripts/bootstrap_run candidates.txt
-//
-// candidates.txt lists domains nobody has run through Layer 2 — curated,
-// plausibly-related judol domains (PJ-801). The script fails loudly if any
-// candidate turns out to already be L2-confirmed (the leakage assertion);
-// fix the candidate list, don't ignore the error.
 package main
 
 import (
@@ -17,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"prejudge/core/layer1"
-	"prejudge/db"
+	"prime/core/layer1"
+	"prime/db"
 )
 
 func main() {

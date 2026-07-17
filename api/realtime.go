@@ -1,8 +1,3 @@
-// Single-source-access follow-up: this is the Blocker's only realtime
-// transport now. It fans out db.ListenDomainBlocked's Postgres NOTIFY
-// payloads to connected WebSocket clients, so the extension never needs
-// Supabase credentials — everything, live updates included, goes through
-// this API (blocker/lib/realtime.js talks to GET /api/v1/realtime).
 package main
 
 import (
@@ -14,17 +9,11 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"prejudge/db"
+	"prime/db"
 )
 
-// wsHeartbeat matches the interval the old Supabase-direct realtime.js used
-// — frequent enough to keep an edge proxy (e.g. Cloudflare Tunnel, ~100s
-// idle timeout) from dropping an otherwise-quiet connection.
 const wsHeartbeat = 25 * time.Second
 
-// realtimeHub fans out domain_blocked payloads to every connected client.
-// A slow/stuck client is dropped from that one broadcast rather than
-// blocking the others — it catches up on reconnect via GET /blocklist.
 type realtimeHub struct {
 	mu      sync.Mutex
 	clients map[chan []byte]struct{}
@@ -66,9 +55,6 @@ func (h *realtimeHub) clientCount() int {
 	return len(h.clients)
 }
 
-// serveWS upgrades to a write-only WebSocket: the client never sends
-// anything but pong frames (handled by CloseRead), so there's nothing to
-// read back.
 func (h *realtimeHub) serveWS(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -103,11 +89,6 @@ func (h *realtimeHub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// runRealtimeListener bridges Postgres NOTIFY to the hub with a fixed
-// reconnect backoff — same tradeoff blocker/lib/realtime.js's old adapter
-// documented (ponytail: fine for a demo, exponential backoff if this runs
-// unattended for real). Exits immediately, once, if DATABASE_DIRECT_URL
-// isn't configured, instead of looping on the same error forever.
 func runRealtimeListener(hub *realtimeHub) {
 	if _, err := db.DirectDSNFromEnv(); err != nil {
 		log.Printf("realtime listener disabled: %v", err)

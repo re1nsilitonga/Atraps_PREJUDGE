@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"prejudge/core/layer1"
+	"prime/core/layer1"
 )
 
 func fp(ip string) layer1.Fingerprint {
@@ -20,9 +20,9 @@ func TestRunCountsCatchesAndMisses(t *testing.T) {
 
 	extract := func(domain string) (layer1.Fingerprint, error) {
 		if domain == "sib1.test" {
-			return fp(ip), nil // shares the cluster's hosting IP — should catch
+			return fp(ip), nil
 		}
-		return fp("198.51.100.1"), nil // different infrastructure — should miss
+		return fp("198.51.100.1"), nil
 	}
 
 	result, err := Run(confirmed, candidates, extract, clusters)
@@ -42,7 +42,7 @@ func TestRunCountsCatchesAndMisses(t *testing.T) {
 
 func TestRunLeakageAssertionFailsLoud(t *testing.T) {
 	confirmed := []string{"seed1.test"}
-	candidates := []string{"seed1.test"} // contaminated: a confirmed domain in the candidate pool
+	candidates := []string{"seed1.test"}
 
 	_, err := Run(confirmed, candidates, func(string) (layer1.Fingerprint, error) {
 		t.Fatal("extract must not be called once leakage is detected")
@@ -82,7 +82,7 @@ func TestRunNoMatchingClusterCountsAsMiss(t *testing.T) {
 	ip := "198.51.100.1"
 	result, err := Run(nil, []string{"lonely.test"}, func(string) (layer1.Fingerprint, error) {
 		return fp(ip), nil
-	}, nil) // no clusters at all — the honest cold-start state
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

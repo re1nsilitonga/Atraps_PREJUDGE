@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"prejudge/core"
+	"prime/core"
 )
 
 func TestAnalyzeCachedWritesCacheOnSuccess(t *testing.T) {

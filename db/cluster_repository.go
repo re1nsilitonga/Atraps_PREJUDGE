@@ -1,7 +1,3 @@
-// ClusterRepository persists Layer 1 clusters. It lives in db/, not core/ —
-// Core emits data shapes (PJ-402/403's Cluster struct), it doesn't own a
-// Postgres driver (PRD §9: "Core Engine writes verdicts, adapters decide
-// what that means").
 package db
 
 import (
@@ -11,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"prejudge/core/layer1"
+	"prime/core/layer1"
 )
 
 type ClusterRepository struct {
@@ -22,10 +18,6 @@ func NewClusterRepository(pool *pgxpool.Pool) *ClusterRepository {
 	return &ClusterRepository{pool: pool}
 }
 
-// Upsert writes a cluster and re-points its member domains' cluster_id.
-// Re-runnable without duplicating clusters (PJ-402) via select-then-branch —
-// db/schema.sql (frozen T+4) has no UNIQUE constraint on hosting_ip to
-// upsert against, so this avoids needing to reopen that file.
 func (r *ClusterRepository) Upsert(ctx context.Context, c layer1.Cluster) (string, error) {
 	var id string
 	err := r.pool.QueryRow(ctx, `SELECT id FROM fingerprint_clusters WHERE hosting_ip = $1`, c.HostingIP).Scan(&id)
@@ -59,11 +51,7 @@ func (r *ClusterRepository) Upsert(ctx context.Context, c layer1.Cluster) (strin
 	return id, err
 }
 
-// ListClusters loads clusters for the matcher (PJ-405's /fingerprint endpoint).
 func (r *ClusterRepository) ListClusters(ctx context.Context) ([]layer1.Cluster, error) {
-	// host(hosting_ip), not hosting_ip::text — ::text on an inet column
-	// includes the netmask ("203.0.113.55/32"), which never equality-matches
-	// a plain IP string from DNS. host() strips it to the bare address.
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, host(hosting_ip), COALESCE(nameserver, ''), COALESCE(registrar, ''), COALESCE(tld, ''), registration_burst_score
 		FROM fingerprint_clusters

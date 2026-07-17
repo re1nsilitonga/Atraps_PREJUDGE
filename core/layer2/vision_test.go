@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"prejudge/core"
+	"prime/core"
 )
 
 func geminiServer(t *testing.T, text string) *httptest.Server {

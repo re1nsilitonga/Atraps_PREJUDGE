@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"prejudge/core"
+	"prime/core"
 )
 
 type fakeStore struct {
