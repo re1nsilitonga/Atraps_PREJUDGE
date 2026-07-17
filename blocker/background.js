@@ -1,8 +1,9 @@
 import { fetchFull, applyFull, applyOne, removeDomain } from "./lib/blocklist.js";
 import { createRealtimeAdapter } from "./lib/realtime.js";
 import { createPollingAdapter } from "./lib/polling.js";
+import { maybeCapture } from "./evidence.js";
 
-const ADAPTER_MODE_KEY = "adapterMode"; // "realtime" | "polling"
+const ADAPTER_MODE_KEY = "adapterMode";
 
 let activeAdapter = null;
 
@@ -11,9 +12,6 @@ async function getAdapterMode() {
   return mode;
 }
 
-// startAdapter is idempotent: stops whatever is running, starts the mode
-// requested. Called on boot and whenever the popup flips the feature flag
-// (PJ-505 — one flag switches transports, no reload needed).
 async function startAdapter() {
   activeAdapter?.stop();
   const mode = await getAdapterMode();
@@ -21,11 +19,6 @@ async function startAdapter() {
   activeAdapter.start();
 }
 
-// bootPromise dedupes concurrent boot() calls: top-level module code already
-// runs on every service-worker start (install, browser startup, or waking
-// from idle), so onInstalled/onStartup firing *again* on top of that raced
-// two boots against each other — the second stopped the first's still-
-// connecting WebSocket, logging "closed before the connection is established".
 let bootPromise = null;
 
 function boot() {
@@ -43,10 +36,16 @@ chrome.runtime.onInstalled.addListener(boot);
 chrome.runtime.onStartup.addListener(boot);
 boot();
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete" && tab.url) {
+    maybeCapture(tabId, tab.url);
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "SET_ADAPTER_MODE") {
     chrome.storage.local.set({ [ADAPTER_MODE_KEY]: message.mode }).then(startAdapter).then(() => sendResponse({ ok: true }));
-    return true; // async response
+    return true;
   }
   if (message?.type === "GET_ADAPTER_MODE") {
     getAdapterMode().then((mode) => sendResponse({ mode }));
