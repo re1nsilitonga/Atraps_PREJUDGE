@@ -1,16 +1,15 @@
-
-const RULE_ID_COUNTER_KEY = "ruleIdCounter";
 const RULE_MAP_KEY = "ruleMap";
 
 function signatureOf(entry) {
   return JSON.stringify([entry.confidence, entry.reason, entry.matchedFields]);
 }
 
-async function nextRuleId() {
-  const { [RULE_ID_COUNTER_KEY]: counter = 0 } = await chrome.storage.local.get(RULE_ID_COUNTER_KEY);
-  const next = counter + 1;
-  await chrome.storage.local.set({ [RULE_ID_COUNTER_KEY]: next });
-  return next;
+function ruleIdFor(domain) {
+  let hash = 5381;
+  for (let i = 0; i < domain.length; i++) {
+    hash = ((hash << 5) + hash + domain.charCodeAt(i)) | 0;
+  }
+  return ((hash >>> 0) % 0x3fffffff) + 1;
 }
 
 function redirectUrl(entry) {
@@ -46,7 +45,7 @@ export async function syncRules(entries) {
   const removeRuleIds = [];
   for (const domain of Object.keys(ruleMap)) {
     if (!wantedDomains.has(domain)) {
-      removeRuleIds.push(ruleMap[domain].ruleId);
+      removeRuleIds.push(ruleIdFor(domain));
       delete ruleMap[domain];
     }
   }
@@ -54,16 +53,11 @@ export async function syncRules(entries) {
   const addRules = [];
   for (const entry of entries) {
     const signature = signatureOf(entry);
-    const existing = ruleMap[entry.domain];
-    if (existing && existing.signature === signature) continue;
+    if (ruleMap[entry.domain] === signature) continue;
 
-    let ruleId = existing?.ruleId;
-    if (ruleId) {
-      removeRuleIds.push(ruleId);
-    } else {
-      ruleId = await nextRuleId();
-    }
-    ruleMap[entry.domain] = { ruleId, signature };
+    const ruleId = ruleIdFor(entry.domain);
+    removeRuleIds.push(ruleId);
+    ruleMap[entry.domain] = signature;
     addRules.push(buildRule(ruleId, entry));
   }
 
