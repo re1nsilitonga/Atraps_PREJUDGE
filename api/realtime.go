@@ -14,6 +14,15 @@ import (
 
 const wsHeartbeat = 25 * time.Second
 
+// chromeExtensionOriginPattern matches a Chrome extension's Origin header
+// host (chrome-extension://<32-char id>, seen by nhooyr's OriginPatterns
+// as just the 32-char id -- it matches the Origin URL's Host, not its
+// scheme). Extension IDs use only a-p (base16 shifted by 'a'), so this
+// can't collide with a real attacker-controlled domain, which needs at
+// least one dot. Same-origin requests (e.g. curl against localhost:8000
+// directly) are already allowed by nhooyr without needing this pattern.
+const chromeExtensionOriginPattern = "[a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p][a-p]"
+
 type realtimeHub struct {
 	mu      sync.Mutex
 	clients map[chan []byte]struct{}
@@ -56,7 +65,9 @@ func (h *realtimeHub) clientCount() int {
 }
 
 func (h *realtimeHub) serveWS(w http.ResponseWriter, r *http.Request) {
-	c, err := websocket.Accept(w, r, nil)
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: []string{chromeExtensionOriginPattern},
+	})
 	if err != nil {
 		log.Printf("realtime: accept failed: %v", err)
 		return
